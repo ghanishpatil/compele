@@ -1,0 +1,127 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Firebase credentials and config files
+app/google-services.json
+app/google-services (1).json
+google-services.json
+*firebase-adminsdk*.json
+backend/startup-cf3fd-firebase-adminsdk-fbsvc-*.json
+backend/*.json
+app/src/google-services.json
+**/google-services.json
+
+# Firebase local emulator data
+firebase-debug.log
+firebase-debug.*.log
+ui-debug.log
+firestore-debug.log
+database-debug.log
+pubsub-debug.log
+.firebase/
+
+# Sensitive configuration files
+*.keystore
+*.jks
+*.p12
+*.key
+*.pem
+backend/.env
+.env
+app/src/main/res/values/secrets.xml
+app/src/main/assets/config.json
+
+# Android build files
+app/release/
+app/debug/
+*.apk
+*.ap_
+*.aab
+*.aar
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.log/
+
+# Gradle files
+.gradle/
+build/
+.gradle
+/build/
+gradle-app.setting
+!gradle-wrapper.jar
+.gradletasknamecache
+
+# Local configuration file (sdk path, etc)
+local.properties
+.properties
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+# Crashlytics
+crashlytics.properties
+crashlytics-build.properties
+fabric.properties
+com_crashlytics_export_strings.xml
+
+# IDE - VS Code
+.vscode/
+*.code-workspace
+.history
+
+# Android Studio / IntelliJ
+/.idea
+*.iws
+.idea/tasks.xml
+.idea/dictionaries
+.idea/vcs.xml
+.idea/*.iml
+.idea/encodings.xml
+.idea/misc.xml
+.idea/scopes/
+.idea/codeStyles/
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/gradle.xml
+out/
+
+# Kotlin
+.kotlin/
+
+# Temporary files
+*~
+*.tmp
+*.temp
+*.swp
+*.swo

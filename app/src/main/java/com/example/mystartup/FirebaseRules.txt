@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Office Locations
+    match /office_locations/{locationId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Admins collection - allow admins to create other admins
+    match /admins/{adminId} {
+      allow create: if isAdmin();  // Only admins can create other admins
+      allow read: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    // Special case for creating the first admin
+    match /admins/{userId} {
+      allow create: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Allow admins to create and manage users
+      allow create, update, delete: if isAdmin();
+      
+      // Allow users to read/write their own documents
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow admins to read all user documents
+      allow read: if isAdmin();
+
+      // Allow checking for existing Sevarth IDs during registration
+      allow list: if request.auth != null;
+    }
+
+    // Allow listing users to check for duplicate Sevarth IDs
+    match /users {
+      allow list: if request.auth != null;
+    }
+  }
+} 

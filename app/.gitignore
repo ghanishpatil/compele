@@ -1,0 +1,22 @@
+/build
+/release
+/debug
+/generated
+/schemas
+
+# Sensitive configuration files
+/google-services.json
+/google-services (1).json
+/src/debug/google-services.json
+/src/release/google-services.json
+/src/google-services.json
+/src/main/google-services.json
+google-services.json
+*.keystore
+*.jks
+/src/main/res/values/secrets.xml
+/src/main/assets/config.json
+
+# Generated files
+/src/main/res/values/strings-generated.xml
+/src/main/assets/schema.json
