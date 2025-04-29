@@ -934,46 +934,69 @@ def verify_face():
 @app.route('/api/mark-attendance', methods=['POST'])
 def mark_attendance():
     """
-    Endpoint to mark attendance
-    Request body should contain:
-    - sevarth_id: User's Sevarth ID
-    - type: "check_in" or "check_out"
-    - verification_confidence: Confidence score from face verification
+    Mark attendance for a user with improved error handling and logging
     """
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'message': 'No data provided'}), 400
-    
-    sevarth_id = data.get('sevarth_id')
-    attendance_type = data.get('type')
-    verification_confidence = data.get('verification_confidence', 0)
-    
-    if not sevarth_id or not attendance_type:
-        return jsonify({'message': 'Missing required fields'}), 400
-    
-    if attendance_type not in ['check_in', 'check_out']:
-        return jsonify({'message': 'Invalid attendance type. Must be "check_in" or "check_out"'}), 400
-    
     try:
+        data = request.get_json()
+        if not data:
+            logger.error("No JSON data received in request")
+            return jsonify({
+                'message': 'No data provided',
+                'success': False
+            }), 400
+
+        # Extract and validate required fields
+        sevarth_id = data.get('sevarth_id')
+        attendance_type = data.get('type')
+        verification_confidence = data.get('verification_confidence', 0.0)
+
+        logger.info(f"Processing attendance for sevarth_id: {sevarth_id}, type: {attendance_type}")
+
+        if not all([sevarth_id, attendance_type]):
+            logger.error(f"Missing required fields. sevarth_id: {sevarth_id}, type: {attendance_type}")
+            return jsonify({
+                'message': 'Missing required fields',
+                'success': False
+            }), 400
+
+        if attendance_type not in ['check_in', 'check_out']:
+            logger.error(f"Invalid attendance type: {attendance_type}")
+            return jsonify({
+                'message': 'Invalid attendance type',
+                'success': False
+            }), 400
+
         # Get current date and time
         now = datetime.datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M:%S")
-        
+
         # Get user details from Firestore
-        user_ref = db.collection('users').where('sevarthId', '==', sevarth_id).limit(1)
-        user_docs = user_ref.get()
-        
-        if not user_docs:
-            return jsonify({'message': 'User not found'}), 404
-        
-        user_data = user_docs[0].to_dict()
-        user_name = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}"
-        
+        users_ref = db.collection('users').where('sevarthId', '==', sevarth_id).limit(1)
+        users = users_ref.get()
+
+        if not users or len(users) == 0:
+            logger.error(f"User not found for sevarth_id: {sevarth_id}")
+            return jsonify({
+                'message': 'User not found',
+                'success': False
+            }), 404
+
+        user_data = users[0].to_dict()
+        user_name = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip()
+        uid = user_data.get('uid', '')
+
+        if not uid:
+            logger.error(f"User UID not found for sevarth_id: {sevarth_id}")
+            return jsonify({
+                'message': 'User data incomplete',
+                'success': False
+            }), 400
+
         # Create attendance record
         attendance_data = {
-            'userId': sevarth_id,
+            'sevarthId': sevarth_id,
+            'userId': uid,
             'userName': user_name,
             'date': date_str,
             'time': time_str,
@@ -982,21 +1005,54 @@ def mark_attendance():
             'verificationConfidence': verification_confidence,
             'timestamp': firestore.SERVER_TIMESTAMP
         }
-        
-        # Add to Firestore
-        attendance_ref = db.collection('face-recognition-attendance').document()
-        attendance_ref.set(attendance_data)
-        
-        return jsonify({
-            'message': f'Attendance {attendance_type} marked successfully',
-            'attendance_id': attendance_ref.id,
-            'date': date_str,
-            'time': time_str
-        }), 200
-        
+
+        # Generate document ID
+        doc_id = f"{sevarth_id}_{int(now.timestamp())}"
+        logger.info(f"Generated document ID: {doc_id}")
+
+        # Create a transaction to ensure data consistency
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def commit_attendance(transaction, doc_id, attendance_data):
+            doc_ref = db.collection('face-recognition-attendance').document(doc_id)
+            # Check if document already exists
+            doc = doc_ref.get(transaction=transaction)
+            if doc.exists:
+                logger.warning(f"Document {doc_id} already exists, generating new ID")
+                # If exists, modify the ID slightly
+                doc_id = f"{sevarth_id}_{int(now.timestamp())}_retry"
+                doc_ref = db.collection('face-recognition-attendance').document(doc_id)
+            
+            transaction.set(doc_ref, attendance_data)
+            return doc_id
+
+        try:
+            # Execute the transaction
+            final_doc_id = commit_attendance(transaction, doc_id, attendance_data)
+            logger.info(f"Successfully marked attendance with document ID: {final_doc_id}")
+
+            return jsonify({
+                'message': f'Attendance {attendance_type} marked successfully',
+                'attendance_id': final_doc_id,
+                'date': date_str,
+                'time': time_str,
+                'success': True
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Firestore transaction failed: {str(e)}")
+            return jsonify({
+                'message': f'Error in Firestore transaction: {str(e)}',
+                'success': False
+            }), 500
+
     except Exception as e:
         logger.error(f"Error marking attendance: {str(e)}")
-        return jsonify({'message': f'Error marking attendance: {str(e)}'}), 500
+        return jsonify({
+            'message': f'Error marking attendance: {str(e)}',
+            'success': False
+        }), 500
 
 @app.route('/api/attendance-history', methods=['GET'])
 def get_attendance_history():

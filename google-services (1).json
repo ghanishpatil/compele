@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "352878198850",
+    "project_id": "startup-cf3fd",
+    "storage_bucket": "startup-cf3fd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:352878198850:android:4398dc48431c1ede606ddb",
+        "android_client_info": {
+          "package_name": "com.example.mystartup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAnYxfClqk4jjf8IRRIEd_yMcegN5_bKm4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

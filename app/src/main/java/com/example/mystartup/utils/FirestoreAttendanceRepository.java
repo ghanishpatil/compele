@@ -1,5 +1,7 @@
 package com.example.mystartup.utils;
 
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import com.google.firebase.Timestamp;
@@ -19,11 +21,15 @@ import java.util.Map;
 public class FirestoreAttendanceRepository {
     private static final String TAG = "FirestoreAttendanceRepo";
     private static final String COLLECTION_PATH = "face-recognition-attendance";
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 1000; // 1 second delay between retries
     
     private final FirebaseFirestore db;
+    private final Handler mainHandler;
     
     public FirestoreAttendanceRepository() {
         this.db = FirebaseFirestore.getInstance();
+        this.mainHandler = new Handler(Looper.getMainLooper());
     }
     
     /**
@@ -38,88 +44,107 @@ public class FirestoreAttendanceRepository {
     public void saveAttendance(String sevarthId, String userId, String userName, String type, 
                              double verificationConfidence, AttendanceCallback callback) {
         if (sevarthId == null || sevarthId.isEmpty()) {
-            Log.e(TAG, "saveAttendance: sevarthId is null or empty");
-            callback.onError("Sevarth ID is required");
+            String error = "saveAttendance: sevarthId is null or empty";
+            Log.e(TAG, error);
+            callback.onError(error);
             return;
         }
-        
+
         try {
             // Generate document ID based on sevarthId and timestamp
-            // This ensures document IDs are unique but also contain the sevarthId
-            String docId = sevarthId + "_" + System.currentTimeMillis();
+            long timestamp = System.currentTimeMillis();
+            String docId = sevarthId + "_" + timestamp;
             Log.d(TAG, "saveAttendance: Creating document with ID: " + docId);
             
             // Get current date and time
-            Date now = new Date();
-            Timestamp timestamp = new Timestamp(now);
+            Date now = new Date(timestamp);
+            Timestamp firestoreTimestamp = new Timestamp(now);
             SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
             SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss", Locale.US);
             
-            // Create attendance data
+            // Create attendance data exactly matching backend structure
             Map<String, Object> attendanceData = new HashMap<>();
-            // Ensure sevarthId is explicitly saved in the document
             attendanceData.put("sevarthId", sevarthId);
             attendanceData.put("userId", userId);
             attendanceData.put("userName", userName);
             attendanceData.put("type", type);
-            attendanceData.put("timestamp", timestamp);
+            attendanceData.put("timestamp", firestoreTimestamp);
             attendanceData.put("date", dateFormat.format(now));
             attendanceData.put("time", timeFormat.format(now));
             attendanceData.put("status", "Present");
             attendanceData.put("verificationConfidence", verificationConfidence);
             
-            Log.d(TAG, "saveAttendance: Attempting to save attendance data: " + attendanceData.toString());
+            Log.d(TAG, "saveAttendance: Attempting to save attendance data: " + attendanceData);
             
-            // Also update the user's document with their sevarthId
-            updateUserWithSevarthId(userId, sevarthId);
+            // First try with a direct set
+            saveWithRetry(docId, attendanceData, callback, dateFormat.format(now), timeFormat.format(now), 0);
             
-            // Save to Firestore with SetOptions.merge() to avoid overwrites
-            db.collection(COLLECTION_PATH)
-                .document(docId)
-                .set(attendanceData, SetOptions.merge())
-                .addOnSuccessListener(aVoid -> {
-                    Log.d(TAG, "saveAttendance: Successfully saved document with ID: " + docId);
-                    callback.onSuccess(docId, dateFormat.format(now), timeFormat.format(now));
-                })
-                .addOnFailureListener(e -> {
-                    String errorMsg = "Failed to save attendance: " + (e.getMessage() != null ? e.getMessage() : "Unknown error");
-                    Log.e(TAG, "saveAttendance: " + errorMsg, e);
-                    callback.onError(errorMsg);
-                    
-                    // Try an alternative approach if the first one fails
-                    retryWithTransaction(docId, attendanceData, callback, dateFormat.format(now), timeFormat.format(now));
-                });
         } catch (Exception e) {
-            String errorMsg = "Exception during attendance save: " + e.getMessage();
+            String errorMsg = "Exception during attendance save preparation: " + e.getMessage();
             Log.e(TAG, errorMsg, e);
             callback.onError(errorMsg);
         }
     }
     
-    /**
-     * Retry saving attendance with a transaction if the regular save fails
-     */
-    private void retryWithTransaction(String docId, Map<String, Object> attendanceData, 
-                                    AttendanceCallback callback, String date, String time) {
-        Log.d(TAG, "retryWithTransaction: Attempting to save using transaction for document ID: " + docId);
-        
-        try {
-            db.runTransaction(transaction -> {
-                transaction.set(db.collection(COLLECTION_PATH).document(docId), attendanceData);
-                return null;
-            }).addOnSuccessListener(aVoid -> {
-                Log.d(TAG, "retryWithTransaction: Successfully saved document with transaction: " + docId);
-                callback.onSuccess(docId, date, time);
-            }).addOnFailureListener(e -> {
-                String errorMsg = "Failed to save with transaction: " + e.getMessage();
-                Log.e(TAG, "retryWithTransaction: " + errorMsg, e);
-                callback.onError(errorMsg);
-            });
-        } catch (Exception e) {
-            String errorMsg = "Exception during transaction: " + e.getMessage();
-            Log.e(TAG, errorMsg, e);
-            callback.onError(errorMsg);
+    private void saveWithRetry(String docId, Map<String, Object> attendanceData, 
+                             AttendanceCallback callback, String date, String time, int retryCount) {
+        if (retryCount >= MAX_RETRIES) {
+            String error = "Maximum retry attempts reached. All attempts to save attendance failed.";
+            Log.e(TAG, error);
+            callback.onError(error);
+            return;
         }
+
+        Log.d(TAG, "saveWithRetry: Attempt " + (retryCount + 1) + " for document: " + docId);
+        
+        db.collection(COLLECTION_PATH)
+            .document(docId)
+            .set(attendanceData)
+            .addOnSuccessListener(aVoid -> {
+                Log.d(TAG, "saveWithRetry: Successfully saved document with ID: " + docId);
+                callback.onSuccess(docId, date, time);
+            })
+            .addOnFailureListener(e -> {
+                String errorMsg = "Attempt " + (retryCount + 1) + " failed: " + e.getMessage();
+                Log.e(TAG, errorMsg, e);
+                
+                // Check specific error types
+                if (e instanceof FirebaseFirestoreException) {
+                    FirebaseFirestoreException firestoreException = (FirebaseFirestoreException) e;
+                    Log.e(TAG, "Firestore error code: " + firestoreException.getCode());
+                    
+                    // Handle specific error cases
+                    switch (firestoreException.getCode()) {
+                        case PERMISSION_DENIED:
+                            callback.onError("Permission denied. Please check authentication.");
+                            return;
+                        case UNAVAILABLE:
+                            // Retry after delay for network issues
+                            retryAfterDelay(docId, attendanceData, callback, date, time, retryCount);
+                            return;
+                        case ALREADY_EXISTS:
+                            // Generate new document ID and retry
+                            String newDocId = docId + "_retry_" + System.currentTimeMillis();
+                            Log.d(TAG, "Document already exists, retrying with new ID: " + newDocId);
+                            saveWithRetry(newDocId, attendanceData, callback, date, time, retryCount);
+                            return;
+                        default:
+                            // For other errors, try regular retry
+                            retryAfterDelay(docId, attendanceData, callback, date, time, retryCount);
+                    }
+                } else {
+                    // For non-Firestore exceptions, try regular retry
+                    retryAfterDelay(docId, attendanceData, callback, date, time, retryCount);
+                }
+            });
+    }
+    
+    private void retryAfterDelay(String docId, Map<String, Object> attendanceData,
+                                AttendanceCallback callback, String date, String time, int retryCount) {
+        mainHandler.postDelayed(() -> {
+            Log.d(TAG, "retryAfterDelay: Retrying after delay, attempt " + (retryCount + 2));
+            saveWithRetry(docId, attendanceData, callback, date, time, retryCount + 1);
+        }, RETRY_DELAY_MS);
     }
     
     /**

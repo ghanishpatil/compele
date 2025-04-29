@@ -482,68 +482,49 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
                                         statusText.setText("Verified! Recording attendance...");
                                         
                                         // Mark attendance immediately after verification
-                                        faceRepository.markAttendance(sevarthId, attendanceType, result.getConfidence(), 
-                                                new FaceRecognitionRepository.RepositoryCallback<AttendanceResponse>() {
-                                            @Override
-                                            public void onSuccess(AttendanceResponse attendanceResult) {
-                                                // After API marks attendance, save to Firestore with sevarthId as the key component
-                                                firestoreAttendanceRepository.saveAttendance(
-                                                        sevarthId,
-                                                        userId,
-                                                        userName, 
-                                                        attendanceType, 
-                                                        result.getConfidence(),
-                                                        new FirestoreAttendanceRepository.AttendanceCallback() {
-                                                            @Override
-                                                            public void onSuccess(String documentId, String date, String time) {
-                                                                Log.d(TAG, "Attendance saved to Firestore with ID: " + documentId);
-                                                                
-                                                                dialog.dismiss();
-                                                                String attendanceText = attendanceType.equals("check_in") ? "Check-In" : "Check-Out";
-                                                                
-                                                                // Update UI with success
-                                                                Snackbar.make(binding.getRoot(), 
-                                                                        attendanceText + " recorded at " + time,
-                                                                        Snackbar.LENGTH_LONG)
-                                                                        .setBackgroundTint(requireContext().getColor(R.color.green_success))
-                                                                        .show();
-                                                                
-                                                                binding.faceRecognitionStatus.setText("✓ " + attendanceText + " successful");
-                                                                binding.faceRecognitionStatus.setBackgroundResource(R.color.green_success);
-                                                            }
-                                                            
-                                                            @Override
-                                                            public void onError(String errorMessage) {
-                                                                Log.e(TAG, "Error saving to Firestore: " + errorMessage);
-                                                                // Still continue as the API call was successful
-                                                                dialog.dismiss();
-                                                                String attendanceText = attendanceType.equals("check_in") ? "Check-In" : "Check-Out";
-                                                                Snackbar.make(binding.getRoot(), 
-                                                                        attendanceText + " recorded at " + attendanceResult.getTime() + 
-                                                                        " (Firestore sync failed)",
-                                                                        Snackbar.LENGTH_LONG)
-                                                                        .setBackgroundTint(requireContext().getColor(R.color.green_success))
-                                                                        .show();
-                                                            }
-                                                        });
-                                            }
-                                            
-                                            @Override
-                                            public void onError(String errorMessage) {
-                                                dialog.dismiss();
-                                                handleError("Attendance marking failed: " + errorMessage);
-                                            }
-                                        });
+                                        faceRepository.markAttendance(sevarthId, attendanceType, result.getConfidence(),
+                                            new FaceRecognitionRepository.RepositoryCallback<AttendanceResponse>() {
+                                                @Override
+                                                public void onSuccess(AttendanceResponse response) {
+                                                    // The backend has already stored the attendance, no need to store in Firestore again
+                                                    dialog.dismiss();
+                                                    String attendanceText = attendanceType.equals("check_in") ? "Check-In" : "Check-Out";
+                                                    
+                                                    // Update UI with success
+                                                    requireActivity().runOnUiThread(() -> {
+                                                        Snackbar.make(binding.getRoot(), 
+                                                                attendanceText + " recorded at " + response.getTime(),
+                                                                Snackbar.LENGTH_LONG)
+                                                                .setBackgroundTint(requireContext().getColor(R.color.green_success))
+                                                                .show();
+                                                        
+                                                        binding.faceRecognitionStatus.setText("✓ " + attendanceText + " successful");
+                                                        binding.faceRecognitionStatus.setBackgroundResource(R.color.green_success);
+                                                    });
+                                                }
+                                                
+                                                @Override
+                                                public void onError(String errorMessage) {
+                                                    dialog.dismiss();
+                                                    requireActivity().runOnUiThread(() -> {
+                                                        handleError("Failed to mark attendance: " + errorMessage);
+                                                    });
+                                                }
+                                            });
                                     } else {
                                         dialog.dismiss();
-                                        handleError("Face verification failed: " + result.getMessage());
+                                        requireActivity().runOnUiThread(() -> {
+                                            handleError("Face verification failed: " + result.getMessage());
+                                        });
                                     }
                                 }
                                 
                                 @Override
                                 public void onError(String errorMessage) {
                                     dialog.dismiss();
-                                    handleError("Verification error: " + errorMessage);
+                                    requireActivity().runOnUiThread(() -> {
+                                        handleError("Verification error: " + errorMessage);
+                                    });
                                 }
                             });
                         } else {
@@ -561,6 +542,7 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
 
     // Helper method to handle errors consistently
     private void handleError(String errorMessage) {
+        Log.e(TAG, "Error in attendance process: " + errorMessage);
         Snackbar.make(binding.getRoot(), errorMessage, Snackbar.LENGTH_LONG)
                 .setBackgroundTint(requireContext().getColor(R.color.error_red))
                 .show();
