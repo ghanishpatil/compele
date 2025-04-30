@@ -97,16 +97,19 @@ public class AddOfficeLocationActivity extends AppCompatActivity {
     }
 
     private void setupTalukaDropdown() {
-        // Populate Taluka dropdown
-        List<String> talukaOptions = Arrays.asList(
-                "Hingoli", "Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad"
-        );
+        // Populate Taluka dropdown with only Hingoli and Sengaon
+        List<String> talukaOptions = Arrays.asList("Hingoli", "Sengaon");
         
         ArrayAdapter<String> adapter = new ArrayAdapter<>(
                 this, android.R.layout.simple_dropdown_item_1line, talukaOptions);
         
         AutoCompleteTextView talukaDropdown = binding.talukaDropdown;
         talukaDropdown.setAdapter(adapter);
+        
+        // Set default selection to Hingoli if not editing
+        if (editId == null && TextUtils.isEmpty(talukaDropdown.getText())) {
+            talukaDropdown.setText("Hingoli", false);
+        }
     }
 
     private void setupForEditing(String locationId) {

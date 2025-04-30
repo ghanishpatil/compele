@@ -7,8 +7,12 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.RecyclerView.ItemDecoration;
+import android.graphics.Rect;
 
 import com.example.mystartup.adapters.LocationSelectionAdapter;
 import com.example.mystartup.api.RetrofitClient;
@@ -50,8 +54,24 @@ public class LocationSelectionActivity extends AppCompatActivity implements Loca
 
     private void setupRecyclerView() {
         adapter = new LocationSelectionAdapter(locations, this);
-        binding.locationsRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+        LinearLayoutManager layoutManager = new LinearLayoutManager(this);
+        binding.locationsRecyclerView.setLayoutManager(layoutManager);
         binding.locationsRecyclerView.setAdapter(adapter);
+        
+        // Add better visuals
+        binding.locationsRecyclerView.setHasFixedSize(true);
+        binding.locationsRecyclerView.setNestedScrollingEnabled(false);
+        
+        // Add bottom space to last item
+        int spacingInPixels = getResources().getDimensionPixelSize(R.dimen.recycler_item_spacing);
+        binding.locationsRecyclerView.addItemDecoration(new ItemDecoration() {
+            @Override
+            public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, 
+                                      @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
+                // Add space to bottom of each item
+                outRect.bottom = spacingInPixels;
+            }
+        });
     }
 
     private void setupLogoutButton() {

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Card style with navy dark theme -->
+    <style name="NavyCard" parent="Widget.MaterialComponents.CardView">
+        <item name="cardBackgroundColor">#102340</item>
+        <item name="cardCornerRadius">12dp</item>
+        <item name="cardElevation">4dp</item>
+        <item name="contentPadding">16dp</item>
+        <item name="strokeColor">#0D3B66</item>
+        <item name="strokeWidth">1dp</item>
+    </style>
+    
+    <!-- Text input style with navy dark theme -->
+    <style name="NavyTextInputLayout" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+        <item name="boxStrokeColor">@color/navy_light</item>
+        <item name="hintTextColor">@color/navy_light</item>
+        <item name="boxBackgroundColor">#102340</item>
+    </style>
+    
+    <!-- Header text style -->
+    <style name="NavyHeaderText">
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textSize">20sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    
+    <!-- Subheader text style -->
+    <style name="NavySubheaderText">
+        <item name="android:textColor">@color/navy_accent</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    
+    <!-- Regular text style -->
+    <style name="NavyRegularText">
+        <item name="android:textColor">#E0E0E0</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+</resources> 

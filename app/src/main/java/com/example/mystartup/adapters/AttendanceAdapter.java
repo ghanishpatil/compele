@@ -4,6 +4,8 @@ import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AnimationUtils;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -19,11 +21,13 @@ import java.util.List;
 import java.util.Locale;
 
 public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.AttendanceViewHolder> {
-    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("EEE, dd MMM yyyy hh:mm a", Locale.US);
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("EEE, dd MMM yyyy", Locale.US);
+    private static final SimpleDateFormat TIME_FORMAT = new SimpleDateFormat("hh:mm a", Locale.US);
     
     private final Context context;
     private final List<AttendanceRecord> allRecords;
     private List<AttendanceRecord> filteredRecords;
+    private int lastPosition = -1;
     
     public AttendanceAdapter(Context context) {
         this.context = context;
@@ -42,6 +46,17 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
     public void onBindViewHolder(@NonNull AttendanceViewHolder holder, int position) {
         AttendanceRecord record = filteredRecords.get(position);
         holder.bind(record);
+        
+        // Apply animation to each item
+        setAnimation(holder.itemView, position);
+    }
+    
+    private void setAnimation(View viewToAnimate, int position) {
+        if (position > lastPosition) {
+            viewToAnimate.setAlpha(0f);
+            viewToAnimate.animate().alpha(1f).setDuration(300).start();
+            lastPosition = position;
+        }
     }
     
     @Override
@@ -56,6 +71,9 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
         // By default, show all records
         filteredRecords = new ArrayList<>(allRecords);
         notifyDataSetChanged();
+        
+        // Reset the animation position when data changes
+        lastPosition = -1;
     }
     
     public void filterByType(String type) {
@@ -74,18 +92,30 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
         }
         
         notifyDataSetChanged();
+        
+        // Reset the animation position when filter changes
+        lastPosition = -1;
     }
     
     class AttendanceViewHolder extends RecyclerView.ViewHolder {
         private final TextView dateText;
         private final TextView timeText;
         private final TextView officeNameText;
+        private final TextView typeIndicator;
+        private final View statusIndicator;
         
         public AttendanceViewHolder(@NonNull View itemView) {
             super(itemView);
             dateText = itemView.findViewById(R.id.dateText);
             timeText = itemView.findViewById(R.id.timeText);
             officeNameText = itemView.findViewById(R.id.officeNameText);
+            typeIndicator = itemView.findViewById(R.id.typeIndicator);
+            statusIndicator = itemView.findViewById(R.id.statusIndicator);
+            
+            // Apply ripple effect on click
+            itemView.setOnClickListener(v -> {
+                v.startAnimation(AnimationUtils.loadAnimation(context, android.R.anim.fade_in));
+            });
         }
         
         public void bind(AttendanceRecord record) {
@@ -101,6 +131,20 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
                 officeNameText.setText(officeName);
             } else {
                 officeNameText.setText("Unknown Office");
+            }
+            
+            // Set type indicator (check in/out)
+            String recordType = record.getType();
+            if (recordType != null) {
+                if (recordType.equalsIgnoreCase("check_in")) {
+                    typeIndicator.setText("CHECK IN");
+                    typeIndicator.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.success_green));
+                    statusIndicator.setBackgroundColor(ContextCompat.getColor(context, R.color.success_green));
+                } else if (recordType.equalsIgnoreCase("check_out")) {
+                    typeIndicator.setText("CHECK OUT");
+                    typeIndicator.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.navy_medium));
+                    statusIndicator.setBackgroundColor(ContextCompat.getColor(context, R.color.navy_medium));
+                }
             }
         }
     }

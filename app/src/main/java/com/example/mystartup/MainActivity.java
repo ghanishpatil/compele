@@ -32,6 +32,7 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseFirestore db;
     private static final String PREF_NAME = "AuthPrefs";
     private static final String KEY_USER_ROLE = "user_role";
+    private static final String KEY_SEVARTH_ID = "sevarth_id";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,22 +102,114 @@ public class MainActivity extends AppCompatActivity {
     private void loadUserDetails() {
         if (mAuth.getCurrentUser() != null) {
             String uid = mAuth.getCurrentUser().getUid();
+            String sevarthId = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    .getString(KEY_SEVARTH_ID, "");
             
+            // First, check if we can get admin details from "users" collection using sevarthId
+            if (!sevarthId.isEmpty()) {
+                db.collection("users").document(sevarthId)
+                    .get()
+                    .addOnSuccessListener(documentSnapshot -> {
+                        if (documentSnapshot.exists()) {
+                            String firstName = documentSnapshot.getString("firstName");
+                            String lastName = documentSnapshot.getString("lastName");
+                            
+                            if (firstName != null && lastName != null) {
+                                String greeting = "Good " + getTimeOfDay() + ", " + firstName + " " + lastName;
+                                binding.greetingTextView.setText(greeting);
+                                return; // Exit if we found the user
+                            }
+                        }
+                        
+                        // If we couldn't get from users collection, try the admins collection
+                        tryGetAdminDetailsFromAdminsCollection(uid);
+                    })
+                    .addOnFailureListener(e -> {
+                        // On failure, try the admins collection
+                        tryGetAdminDetailsFromAdminsCollection(uid);
+                    });
+            } else {
+                // If no sevarthId, try admins collection directly
+                tryGetAdminDetailsFromAdminsCollection(uid);
+            }
+        }
+    }
+    
+    private void tryGetAdminDetailsFromAdminsCollection(String uid) {
+        Log.d("ADMIN_DEBUG", "Trying to get admin details from admins collection with UID: " + uid);
+        
+        // Look for admin document where authUid field matches current user's UID
+        db.collection("admins")
+            .whereEqualTo("authUid", uid)
+            .get()
+            .addOnSuccessListener(queryDocumentSnapshots -> {
+                if (!queryDocumentSnapshots.isEmpty()) {
+                    // Found document with matching authUid
+                    DocumentSnapshot document = queryDocumentSnapshots.getDocuments().get(0);
+                    String firstName = document.getString("firstName");
+                    String lastName = document.getString("lastName");
+                    
+                    if (firstName != null && lastName != null) {
+                        String greeting = "Good " + getTimeOfDay() + ", " + firstName + " " + lastName;
+                        binding.greetingTextView.setText(greeting);
+                        return;
+                    }
+                }
+                
+                // If we still couldn't find admin info, try to get it from the admin document using sevarthId
+                tryGetAdminDetailsDirectly();
+            })
+            .addOnFailureListener(e -> {
+                // If there was an error, try direct lookup
+                tryGetAdminDetailsDirectly();
+            });
+    }
+
+    private void tryGetAdminDetailsDirectly() {
+        // As a final resort, try to look up all admins and see if there's a match with current user's email
+        String currentEmail = mAuth.getCurrentUser() != null ? mAuth.getCurrentUser().getEmail() : null;
+        
+        if (currentEmail != null) {
             db.collection("admins")
-                .whereEqualTo("uid", uid)
+                .whereEqualTo("email", currentEmail)
                 .get()
-                .addOnSuccessListener(queryDocumentSnapshots -> {
-                    if (!queryDocumentSnapshots.isEmpty()) {
-                        DocumentSnapshot document = queryDocumentSnapshots.getDocuments().get(0);
-                        String firstName = document.getString("first_name");
-                        String lastName = document.getString("last_name");
+                .addOnSuccessListener(querySnapshot -> {
+                    if (!querySnapshot.isEmpty()) {
+                        DocumentSnapshot document = querySnapshot.getDocuments().get(0);
+                        String firstName = document.getString("firstName");
+                        String lastName = document.getString("lastName");
                         
                         if (firstName != null && lastName != null) {
                             String greeting = "Good " + getTimeOfDay() + ", " + firstName + " " + lastName;
                             binding.greetingTextView.setText(greeting);
-                        }
+                        } else {
+                            // If we have a document but no name, use the sevarthId or email
+                            String sevarthId = document.getString("sevarthId");
+                            String displayName = sevarthId != null ? sevarthId : currentEmail;
+                            String greeting = "Good " + getTimeOfDay() + ", " + displayName;
+                            binding.greetingTextView.setText(greeting);
+                    }
+                    } else if (currentEmail != null) {
+                        // If all else fails, just use the email
+                        String greeting = "Good " + getTimeOfDay() + ", " + currentEmail.split("@")[0];
+                        binding.greetingTextView.setText(greeting);
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    // If all lookups fail, just use a generic greeting or the email
+                    if (mAuth.getCurrentUser() != null) {
+                        String email = mAuth.getCurrentUser().getEmail();
+                        String displayName = email != null ? email.split("@")[0] : "Admin";
+                        String greeting = "Good " + getTimeOfDay() + ", " + displayName;
+                        binding.greetingTextView.setText(greeting);
                     }
                 });
+        } else {
+            // If we don't have an email, use display name from Firebase Auth
+            if (mAuth.getCurrentUser() != null && mAuth.getCurrentUser().getDisplayName() != null) {
+                String greeting = "Good " + getTimeOfDay() + ", " + mAuth.getCurrentUser().getDisplayName();
+                binding.greetingTextView.setText(greeting);
+            }
         }
     }
     

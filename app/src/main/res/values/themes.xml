@@ -2,8 +2,22 @@
     <!-- Base application theme. -->
     <style name="Base.Theme.MyStartup" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/navy_medium</item>
+        <item name="colorPrimaryVariant">@color/navy_dark</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/navy_light</item>
+        <item name="colorSecondaryVariant">@color/navy_accent</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="android:statusBarColor">@color/navy_darkest</item>
+        <item name="android:windowBackground">@drawable/navy_gradient_background</item>
     </style>
 
     <style name="Theme.MyStartup" parent="Base.Theme.MyStartup" />
+    
+    <!-- Button style with navy theme -->
+    <style name="NavyButton" parent="Widget.MaterialComponents.Button">
+        <item name="android:background">@drawable/navy_button_background</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textStyle">bold</item>
+    </style>
 </resources>

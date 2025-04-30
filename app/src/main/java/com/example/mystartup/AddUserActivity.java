@@ -40,7 +40,12 @@ import java.util.UUID;
 import android.content.Context;
 import android.content.SharedPreferences;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import android.net.Uri;
+import android.provider.MediaStore;
 
 public class AddUserActivity extends AppCompatActivity {
 
@@ -63,6 +68,7 @@ public class AddUserActivity extends AppCompatActivity {
     private static final String KEY_EMAIL = "email";
     private static final String KEY_PASSWORD = "password";
     private String capturedImagePath;
+    private Uri selectedImageUri;
     
     private final ActivityResultLauncher<Intent> cameraLauncher = registerForActivityResult(
         new ActivityResultContracts.StartActivityForResult(),
@@ -73,11 +79,27 @@ public class AddUserActivity extends AppCompatActivity {
                     capturedImagePath = data.getStringExtra("image_path");
                     if (capturedImagePath != null) {
                         // Image captured successfully, proceed with saving user data
+                        selectedImageUri = null; // Clear selected image if camera was used
+                        binding.imagePreviewText.setText("Face image captured");
+                        binding.imagePreviewText.setVisibility(View.VISIBLE);
                         saveUserToFirebase();
                     }
                 }
             } else {
                 Toast.makeText(this, "Face image capture cancelled", Toast.LENGTH_SHORT).show();
+            }
+        }
+    );
+    
+    private final ActivityResultLauncher<String> galleryLauncher = registerForActivityResult(
+        new ActivityResultContracts.GetContent(),
+        uri -> {
+            if (uri != null) {
+                selectedImageUri = uri;
+                capturedImagePath = null; // Clear captured path if gallery was used
+                binding.imagePreviewText.setText("Image selected from gallery");
+                binding.imagePreviewText.setVisibility(View.VISIBLE);
+                // Don't save to Firebase yet, we'll do that when user clicks Next
             }
         }
     );
@@ -238,27 +260,32 @@ public class AddUserActivity extends AppCompatActivity {
         // Next/Add button
         binding.nextButton.setOnClickListener(v -> {
             if (validateInputs()) {
-                // If we're editing and don't want to change the image, skip camera
-                if (editId != null) {
-                    // Skip camera for editing if user doesn't need to change face image
+                if (selectedImageUri != null) {
+                    // User selected an image from gallery
+                    saveUserToFirebase();
+                } else if (editId != null) {
+                    // If we're editing and don't want to change the image, skip camera
                     new AlertDialog.Builder(this)
                         .setTitle("Face Image")
                         .setMessage("Do you want to update the face image?")
-                        .setPositiveButton("Yes", (dialog, which) -> launchCamera())
+                        .setPositiveButton("Yes", (dialog, which) -> showImageSourceOptions())
                         .setNegativeButton("No", (dialog, which) -> {
                             // Skip camera and proceed
                             saveUserToFirebase();
                         })
                         .show();
                 } else {
-                    // For new users, always capture face image
-                    launchCamera();
+                    // For new users, always get a face image
+                    showImageSourceOptions();
                 }
             }
         });
 
         // Setup location selection
         binding.locationEditText.setOnClickListener(v -> showLocationSelectionDialog());
+        
+        // Setup upload image button
+        binding.uploadImageButton.setOnClickListener(v -> galleryLauncher.launch("image/*"));
     }
 
     private void showLocationSelectionDialog() {
@@ -410,6 +437,21 @@ public class AddUserActivity extends AppCompatActivity {
         return isValid;
     }
 
+    private void showImageSourceOptions() {
+        new AlertDialog.Builder(this)
+            .setTitle("Select Image Source")
+            .setItems(new String[]{"Camera", "Gallery"}, (dialog, which) -> {
+                if (which == 0) {
+                    // Camera option
+                    launchCamera();
+                } else {
+                    // Gallery option
+                    galleryLauncher.launch("image/*");
+                }
+            })
+            .show();
+    }
+
     private void launchCamera() {
         Intent intent = new Intent(this, FaceCaptureActivity.class);
         cameraLauncher.launch(intent);
@@ -473,8 +515,24 @@ public class AddUserActivity extends AppCompatActivity {
             userData.put("createdBy", adminId);
         }
 
-        // Check if we have a face image to upload
-        if (additionalData.containsKey("facePath") && additionalData.get("facePath") != null) {
+        // Handle different image sources
+        if (selectedImageUri != null) {
+            // User selected an image from gallery
+            try {
+                File imageFile = createFileFromUri(selectedImageUri, sevarthId);
+                if (imageFile != null && imageFile.exists()) {
+                    uploadImageAndSaveUser(imageFile, sevarthId, userData);
+                } else {
+                    Toast.makeText(this, "Failed to process selected image", Toast.LENGTH_SHORT).show();
+                    saveUserToFirestore(userData, sevarthId);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error processing selected image: " + e.getMessage(), e);
+                Toast.makeText(this, "Error processing image: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                saveUserToFirestore(userData, sevarthId);
+            }
+        } else if (additionalData.containsKey("facePath") && additionalData.get("facePath") != null) {
+            // We have a captured face image
             String localPath = (String) additionalData.get("facePath");
             File imageFile = new File(localPath);
             if (imageFile.exists()) {
@@ -487,6 +545,36 @@ public class AddUserActivity extends AppCompatActivity {
             // No image to upload, just save the user
             saveUserToFirestore(userData, sevarthId);
         }
+    }
+    
+    private File createFileFromUri(Uri uri, String sevarthId) throws IOException {
+        // Create a directory for reference images if it doesn't exist
+        File mediaDir = new File(getExternalFilesDir(null), "reference_images");
+        if (!mediaDir.exists()) {
+            mediaDir.mkdirs();
+        }
+        
+        // Create a file with the proper naming convention
+        File destinationFile = new File(mediaDir, "face_" + sevarthId + ".jpg");
+        
+        // Copy the content from the URI to the file
+        InputStream inputStream = getContentResolver().openInputStream(uri);
+        if (inputStream == null) {
+            return null;
+        }
+        
+        OutputStream outputStream = new FileOutputStream(destinationFile);
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            outputStream.write(buffer, 0, bytesRead);
+        }
+        
+        outputStream.close();
+        inputStream.close();
+        
+        return destinationFile;
     }
 
     private void uploadImageAndSaveUser(File imageFile, String sevarthId, Map<String, Object> userData) {

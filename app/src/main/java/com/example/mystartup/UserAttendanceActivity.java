@@ -4,10 +4,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.util.Log;
 import androidx.appcompat.app.AppCompatActivity;
 import com.example.mystartup.fragments.UserAttendanceFragment;
 
 public class UserAttendanceActivity extends AppCompatActivity {
+    private static final String TAG = "UserAttendanceActivity";
     private static final String PREF_NAME = "AuthPrefs";
 
     @Override
@@ -22,6 +24,19 @@ public class UserAttendanceActivity extends AppCompatActivity {
         float latitude = prefs.getFloat("selected_location_latitude", 0f);
         float longitude = prefs.getFloat("selected_location_longitude", 0f);
         int radius = prefs.getInt("selected_location_radius", 100);
+        
+        // Log the location details being passed to the fragment
+        Log.d(TAG, "Loading location from SharedPreferences:");
+        Log.d(TAG, "  Location ID: " + locationId);
+        Log.d(TAG, "  Location Name: " + locationName);
+        Log.d(TAG, "  Latitude: " + latitude);
+        Log.d(TAG, "  Longitude: " + longitude);
+        Log.d(TAG, "  Radius: " + radius + "m");
+        
+        // Check if coordinates are valid
+        if (latitude == 0f && longitude == 0f) {
+            Log.w(TAG, "WARNING: Office coordinates are (0,0) which is likely invalid!");
+        }
         
         // Create fragment with location data
         UserAttendanceFragment fragment = new UserAttendanceFragment();

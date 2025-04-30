@@ -90,10 +90,18 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
             officeLongitude = args.getFloat("location_longitude", 0f);
             officeRadius = args.getInt("location_radius", 100);
             
-            Log.d(TAG, "Office location: " + locationName + 
-                  " (Lat: " + officeLatitude + 
+            Log.d(TAG, "Office location loaded: " + locationName + 
+                  " (ID: " + locationId + ", " +
+                  "Lat: " + officeLatitude + 
                   ", Lng: " + officeLongitude + 
                   ", Radius: " + officeRadius + "m)");
+            
+            // Log warning if coordinates are invalid
+            if (officeLatitude == 0f && officeLongitude == 0f) {
+                Log.w(TAG, "WARNING: Office coordinates are (0,0) which is likely invalid. Check if the location was saved correctly.");
+            }
+        } else {
+            Log.e(TAG, "No location arguments provided to fragment!");
         }
         
         loadUserDetails();
@@ -401,25 +409,6 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
         
         binding.viewHistoryButton.setOnClickListener(v -> navigateToAttendanceHistory());
         binding.logoutButton.setOnClickListener(v -> handleLogout());
-        
-        // Add a long press listener on the location status text to enable attendance for testing
-        // This is only for development/testing purposes and should be removed in production
-        binding.locationStatusText.setOnLongClickListener(v -> {
-            // Toggle the location check for testing
-            isWithinOfficeRadius = !isWithinOfficeRadius;
-            updateCheckInButtonState(isWithinOfficeRadius);
-            
-            if (isWithinOfficeRadius) {
-                showLocationStatusMessage("TESTING MODE: Location check bypassed", true);
-                binding.locationStatusText.setText("✓ TEST MODE: Location check bypassed");
-                binding.locationStatusText.setTextColor(ContextCompat.getColor(requireContext(), R.color.green_success));
-            } else {
-                showLocationStatusMessage("TESTING MODE: Normal location check restored", true);
-                onLocationChanged(locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)); // Reset to actual location
-            }
-            
-            return true; // Consume the long click
-        });
     }
 
     private void handleCheckIn() {
@@ -671,14 +660,13 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
             // Check if within adjusted radius
             boolean isInRange = distanceToOffice <= adjustedRadius;
             
+            Log.d(TAG, "Location check: Distance=" + distanceToOffice + "m, Adjusted radius=" + adjustedRadius + 
+                   "m, Is in range=" + isInRange);
+            
             // Update UI based on location
             updateCheckInButtonState(isInRange);
             
             if (isInRange) {
-                // For testing purposes, enable check-in/out temporarily by forcing isWithinOfficeRadius to true
-                // Remove this override in production
-                updateCheckInButtonState(true);
-                
                 // Show appropriate message
                 if (distanceToOffice <= officeRadius) {
                     showLocationStatusMessage("You are within office range");

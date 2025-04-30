@@ -14,12 +14,19 @@
     <color name="purple_700">#FF3700B3</color>
     <color name="teal_200">#FF03DAC5</color>
     <color name="teal_700">#FF018786</color>
-    <color name="primary">#4285F4</color>
-    <color name="blue_secondary">#2196F3</color>
+    <color name="primary">#1A4B8C</color>
+    <color name="blue_secondary">#2A6FBF</color>
     <color name="green_success">#4CAF50</color>
-    <color name="colorPrimary">#4285F4</color>
+    <color name="colorPrimary">#1A4B8C</color>
     
     <!-- Table row colors -->
     <color name="tableRowEven">#FFFFFF</color>
-    <color name="tableRowOdd">#F5F5F5</color>
+    <color name="tableRowOdd">#EEF4FA</color>
+    
+    <!-- New Navy Blue Theme Colors -->
+    <color name="navy_darkest">#0A2342</color>
+    <color name="navy_dark">#0D3B66</color>
+    <color name="navy_medium">#1A4B8C</color>
+    <color name="navy_light">#2A6FBF</color>
+    <color name="navy_accent">#5D9EED</color>
 </resources>

@@ -1,21 +1,28 @@
 package com.example.mystartup;
 
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.AnimationUtils;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.mystartup.adapters.AttendanceAdapter;
 import com.example.mystartup.databinding.ActivityAttendanceHistoryBinding;
 import com.example.mystartup.models.AttendanceRecord;
 import com.google.android.material.chip.Chip;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentChange;
@@ -26,6 +33,11 @@ import com.google.firebase.firestore.QueryDocumentSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import androidx.core.view.ViewCompat;
+import androidx.core.view.ViewPropertyAnimatorListener;
+import androidx.core.view.animation.PathInterpolatorCompat;
+import android.view.animation.Animation;
 
 public class AttendanceHistoryActivity extends AppCompatActivity {
     private static final String TAG = "AttendanceHistory";
@@ -53,6 +65,9 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
             getSupportActionBar().setDisplayShowHomeEnabled(true);
         }
+        
+        // Setup Bottom Navigation
+        setupBottomNavigation();
 
         // Setup RecyclerView
         setupRecyclerView();
@@ -64,27 +79,98 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
         loadAttendanceRecords();
     }
 
+    private void setupBottomNavigation() {
+        BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
+        
+        // Set attendance as selected
+        bottomNav.setSelectedItemId(R.id.nav_attendance);
+        
+        // Apply animations
+        Animation navAnimation = AnimationUtils.loadAnimation(this, R.anim.bottom_nav_item_anim);
+        
+        // Handle navigation clicks
+        bottomNav.setOnItemSelectedListener(item -> {
+            int itemId = item.getItemId();
+            
+            // Apply animation to the selected item
+            View view = bottomNav.findViewById(itemId);
+            if (view != null) {
+                view.startAnimation(navAnimation);
+            }
+            
+            if (itemId == R.id.nav_home) {
+                // Navigate to home/dashboard
+                Intent intent = new Intent(this, UserAttendanceActivity.class);
+                startActivity(intent);
+                overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
+                finish();
+                return true;
+            } 
+            else if (itemId == R.id.nav_attendance) {
+                // We're already on attendance history
+                return true;
+            }
+            
+            return false;
+        });
+    }
+
     private void setupRecyclerView() {
         adapter = new AttendanceAdapter(this);
-        binding.attendanceRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+        LinearLayoutManager layoutManager = new LinearLayoutManager(this);
+        binding.attendanceRecyclerView.setLayoutManager(layoutManager);
         binding.attendanceRecyclerView.setAdapter(adapter);
+        
+        // Add layout animation
+        binding.attendanceRecyclerView.setLayoutAnimation(
+                AnimationUtils.loadLayoutAnimation(this, R.anim.layout_animation_fall_down));
+                
+        // Add item decoration for better spacing
+        int spacingInPixels = getResources().getDimensionPixelSize(R.dimen.recycler_item_spacing);
+        binding.attendanceRecyclerView.addItemDecoration(new RecyclerView.ItemDecoration() {
+            @Override
+            public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, 
+                                     @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
+                int position = parent.getChildAdapterPosition(view);
+                if (position != parent.getAdapter().getItemCount() - 1) {
+                    outRect.bottom = spacingInPixels;
+                }
+            }
+        });
     }
 
     private void setupFilterChips() {
+        // Apply animations to chips
         binding.chipAll.setOnClickListener(v -> {
+            animateChip(binding.chipAll);
             currentFilter = "all";
             adapter.filterByType(currentFilter);
+            binding.attendanceRecyclerView.scheduleLayoutAnimation();
         });
         
         binding.chipCheckIn.setOnClickListener(v -> {
+            animateChip(binding.chipCheckIn);
             currentFilter = "check_in";
             adapter.filterByType(currentFilter);
+            binding.attendanceRecyclerView.scheduleLayoutAnimation();
         });
         
         binding.chipCheckOut.setOnClickListener(v -> {
+            animateChip(binding.chipCheckOut);
             currentFilter = "check_out";
             adapter.filterByType(currentFilter);
+            binding.attendanceRecyclerView.scheduleLayoutAnimation();
         });
+    }
+    
+    private void animateChip(Chip chip) {
+        ObjectAnimator scaleX = ObjectAnimator.ofFloat(chip, "scaleX", 0.8f, 1.0f);
+        ObjectAnimator scaleY = ObjectAnimator.ofFloat(chip, "scaleY", 0.8f, 1.0f);
+        AnimatorSet animatorSet = new AnimatorSet();
+        animatorSet.playTogether(scaleX, scaleY);
+        animatorSet.setDuration(150);
+        animatorSet.setInterpolator(new AccelerateDecelerateInterpolator());
+        animatorSet.start();
     }
 
     private void loadAttendanceRecords() {
@@ -252,11 +338,19 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
 
     private void showLoading(boolean show) {
         binding.progressBar.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            binding.progressBar.startAnimation(AnimationUtils.loadAnimation(this, android.R.anim.fade_in));
+        } else {
+            binding.progressBar.startAnimation(AnimationUtils.loadAnimation(this, android.R.anim.fade_out));
+        }
     }
 
     private void showEmptyView(boolean show) {
-        binding.attendanceRecyclerView.setVisibility(show ? View.GONE : View.VISIBLE);
         binding.emptyView.setVisibility(show ? View.VISIBLE : View.GONE);
+        binding.attendanceRecyclerView.setVisibility(show ? View.GONE : View.VISIBLE);
+        if (show) {
+            binding.emptyView.startAnimation(AnimationUtils.loadAnimation(this, android.R.anim.fade_in));
+        }
     }
 
     private void showError(String message) {
@@ -266,7 +360,7 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == android.R.id.home) {
-            onBackPressed();
+            navigateToHome();
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -274,9 +368,13 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
     
     @Override
     public void onBackPressed() {
-        // Navigate back to UserAttendanceActivity instead of just finishing
+        navigateToHome();
+    }
+    
+    private void navigateToHome() {
         Intent intent = new Intent(this, UserAttendanceActivity.class);
         startActivity(intent);
+        overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
         finish();
     }
     

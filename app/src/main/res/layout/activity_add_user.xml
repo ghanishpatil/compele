@@ -204,7 +204,7 @@
                     android:inputType="phone" />
             </com.google.android.material.textfield.TextInputLayout>
 
-            <!-- Email Address Field -->
+            <!-- Email Field -->
             <com.google.android.material.textfield.TextInputLayout
                 android:id="@+id/emailLayout"
                 style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
@@ -221,6 +221,44 @@
                     android:hint="Email Address *"
                     android:inputType="textEmailAddress" />
             </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Face Image Upload Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="Face Image"
+                android:textColor="#757575"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+                
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="Upload an image or capture with camera when prompted"
+                android:textColor="#505050"
+                android:textSize="14sp" />
+                
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/uploadImageButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:text="Upload Image (Optional)"
+                app:icon="@android:drawable/ic_menu_gallery"
+                app:iconTint="#4051B5" />
+                
+            <TextView
+                android:id="@+id/imagePreviewText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:text=""
+                android:textColor="#4CAF50"
+                android:textStyle="italic"
+                android:visibility="gone" />
 
             <!-- Location Selection -->
             <com.google.android.material.textfield.TextInputLayout
