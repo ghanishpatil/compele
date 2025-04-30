@@ -127,12 +127,13 @@ public class FaceRecognitionRepository {
      * @param sevarthId User's Sevarth ID
      * @param attendanceType Either "check_in" or "check_out"
      * @param confidence Verification confidence (0-1)
+     * @param locationId ID of the office location
      * @param callback Callback for the result
      */
     public void markAttendance(String sevarthId, String attendanceType, float confidence, 
-                             RepositoryCallback<AttendanceResponse> callback) {
+                             String locationId, RepositoryCallback<AttendanceResponse> callback) {
         // Create request
-        AttendanceRequest request = new AttendanceRequest(sevarthId, attendanceType, confidence);
+        AttendanceRequest request = new AttendanceRequest(sevarthId, attendanceType, confidence, locationId);
         
         // Call API
         apiService.markAttendance(request).enqueue(new Callback<AttendanceResponse>() {

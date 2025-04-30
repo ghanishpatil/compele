@@ -5,9 +5,8 @@ plugins {
 }
 
 android {
-    compileSdk = 34
-    buildToolsVersion = "34.0.0"
     namespace = "com.example.mystartup"
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.example.mystartup"
@@ -25,28 +24,46 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    
     kotlinOptions {
         jvmTarget = "17"
     }
+    
     buildFeatures {
         viewBinding = true
     }
     
-    // Add to support the deprecated camera API
-    packagingOptions {
+    packaging {
         resources {
-            excludes += listOf("META-INF/DEPENDENCIES", "META-INF/LICENSE", "META-INF/LICENSE.txt", "META-INF/license.txt", "META-INF/NOTICE", "META-INF/NOTICE.txt", "META-INF/notice.txt", "META-INF/ASL2.0", "META-INF/*.kotlin_module")
+            excludes += listOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/license.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/notice.txt",
+                "META-INF/ASL2.0",
+                "META-INF/*.kotlin_module"
+            )
         }
     }
 }
 
-// Use string values directly instead of variable
-val camerax_version = "1.1.0"
-val camerax_view_version = "1.1.0"
+configurations.all {
+    resolutionStrategy {
+        force("androidx.camera:camera-core:1.1.0")
+        force("androidx.camera:camera-camera2:1.1.0")
+        force("androidx.camera:camera-lifecycle:1.1.0")
+        force("androidx.camera:camera-view:1.1.0")
+        force("androidx.camera:camera-extensions:1.1.0")
+    }
+}
 
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
@@ -68,15 +85,18 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     
-    // CameraX - explicitly define each dependency with direct versions
-    implementation("androidx.camera:camera-core:${camerax_version}")
-    implementation("androidx.camera:camera-camera2:${camerax_version}")
-    implementation("androidx.camera:camera-lifecycle:${camerax_version}")
-    implementation("androidx.camera:camera-view:${camerax_view_version}")
-    implementation("androidx.camera:camera-extensions:${camerax_version}")
+    // CameraX
+    implementation("androidx.camera:camera-core:1.2.3")
+    implementation("androidx.camera:camera-camera2:1.2.3")
+    implementation("androidx.camera:camera-lifecycle:1.2.3")
+    implementation("androidx.camera:camera-view:1.2.3")
+    implementation("androidx.camera:camera-extensions:1.2.3")
     
     // Required for CameraX
     implementation("com.google.guava:guava:31.1-android")
+    
+    // ML Kit for face detection
+    implementation("com.google.mlkit:face-detection:16.1.5")
     
     // Testing
     testImplementation("junit:junit:4.13.2")

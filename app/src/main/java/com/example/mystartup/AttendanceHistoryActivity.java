@@ -194,6 +194,10 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
                         String docSevarthId = document.getString("sevarthId");
                         record.setSevarthId(docSevarthId);
                         
+                        // Get the office name if it exists
+                        String officeName = document.getString("officeName");
+                        record.setOfficeName(officeName);
+                        
                         // Try to get verification confidence if it exists
                         if (document.contains("verificationConfidence")) {
                             Double confidence = document.getDouble("verificationConfidence");

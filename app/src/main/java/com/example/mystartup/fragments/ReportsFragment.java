@@ -1,6 +1,7 @@
 package com.example.mystartup.fragments;
 
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -42,10 +43,15 @@ public class ReportsFragment extends Fragment {
     }
     
     private void showUserReports() {
-        FragmentTransaction transaction = getParentFragmentManager().beginTransaction();
-        transaction.replace(R.id.fragmentContainer, new UserAttendanceReportFragment());
-        transaction.addToBackStack(null);
-        transaction.commit();
+        try {
+            FragmentTransaction transaction = getParentFragmentManager().beginTransaction();
+            transaction.replace(R.id.fragmentContainer, new UserAttendanceReportFragment());
+            transaction.addToBackStack(null);
+            transaction.commit();
+        } catch (Exception e) {
+            Log.e("ReportsFragment", "Error showing user reports", e);
+            Toast.makeText(requireContext(), "Error showing user reports: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
     
     private void showDailyReports() {

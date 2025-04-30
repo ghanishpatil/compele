@@ -77,52 +77,31 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
     }
     
     class AttendanceViewHolder extends RecyclerView.ViewHolder {
-        private final TextView attendanceTypeText;
-        private final TextView dateTimeText;
-        private final TextView locationText;
-        private final TextView faceConfidenceText;
+        private final TextView dateText;
+        private final TextView timeText;
+        private final TextView officeNameText;
         
         public AttendanceViewHolder(@NonNull View itemView) {
             super(itemView);
-            attendanceTypeText = itemView.findViewById(R.id.attendanceTypeText);
-            dateTimeText = itemView.findViewById(R.id.dateTimeText);
-            locationText = itemView.findViewById(R.id.locationText);
-            faceConfidenceText = itemView.findViewById(R.id.faceConfidenceText);
+            dateText = itemView.findViewById(R.id.dateText);
+            timeText = itemView.findViewById(R.id.timeText);
+            officeNameText = itemView.findViewById(R.id.officeNameText);
         }
         
         public void bind(AttendanceRecord record) {
-            // Set attendance type with appropriate background color
-            if (record.isCheckIn()) {
-                attendanceTypeText.setText("CHECK-IN");
-                attendanceTypeText.setBackgroundTintList(
-                        ContextCompat.getColorStateList(context, R.color.green_success));
-            } else {
-                attendanceTypeText.setText("CHECK-OUT");
-                attendanceTypeText.setBackgroundTintList(
-                        ContextCompat.getColorStateList(context, R.color.blue_primary));
-            }
+            // Set date
+            dateText.setText(record.getDate());
             
-            // Format and set date/time - use the formatted date and time from record if available
-            if (record.getDate() != null && record.getTime() != null) {
-                dateTimeText.setText(record.getDate() + " " + record.getTime());
-            } else if (record.getTimestamp() != null) {
-                dateTimeText.setText(DATE_FORMAT.format(record.getTimestamp().toDate()));
-            } else {
-                dateTimeText.setText("Unknown Time");
-            }
+            // Set time
+            timeText.setText(record.getTime());
             
-            // Set location or username if location isn't available
-            if (record.getLocationName() != null && !record.getLocationName().isEmpty()) {
-                locationText.setText(record.getLocationName());
-            } else if (record.getUserName() != null && !record.getUserName().isEmpty()) {
-                locationText.setText("User: " + record.getUserName());
+            // Set office name
+            String officeName = record.getOfficeName();
+            if (officeName != null && !officeName.isEmpty()) {
+                officeNameText.setText(officeName);
             } else {
-                locationText.setText("Unknown Location");
+                officeNameText.setText("Unknown Office");
             }
-            
-            // Set face confidence - use verificationConfidence instead of faceConfidence
-            int confidencePercent = (int) (record.getVerificationConfidence() * 100);
-            faceConfidenceText.setText("Verification Confidence: " + confidencePercent + "%");
         }
     }
 } 

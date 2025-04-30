@@ -15,10 +15,14 @@ public class AttendanceRequest {
     @SerializedName("verification_confidence")
     private float verificationConfidence;
     
-    public AttendanceRequest(String sevarthId, String type, float verificationConfidence) {
+    @SerializedName("location_id")
+    private String locationId;
+    
+    public AttendanceRequest(String sevarthId, String type, float verificationConfidence, String locationId) {
         this.sevarthId = sevarthId;
         this.type = type;
         this.verificationConfidence = verificationConfidence;
+        this.locationId = locationId;
     }
     
     public String getSevarthId() {
@@ -43,5 +47,13 @@ public class AttendanceRequest {
     
     public void setVerificationConfidence(float verificationConfidence) {
         this.verificationConfidence = verificationConfidence;
+    }
+    
+    public String getLocationId() {
+        return locationId;
+    }
+    
+    public void setLocationId(String locationId) {
+        this.locationId = locationId;
     }
 } 

@@ -125,3 +125,6 @@ out/
 *.temp
 *.swp
 *.swo
+
+# Firebase Admin SDK
+backend/startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json

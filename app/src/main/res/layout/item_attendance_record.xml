@@ -15,32 +15,28 @@
         android:padding="12dp">
 
         <TextView
-            android:id="@+id/attendanceTypeText"
+            android:id="@+id/dateText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_rounded_tag"
-            android:padding="4dp"
-            android:textColor="@android:color/white"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            tools:text="CHECK-IN"
-            tools:backgroundTint="@color/green_success" />
-
-        <TextView
-            android:id="@+id/dateTimeText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
             android:textSize="16sp"
             android:textStyle="bold"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/attendanceTypeText"
-            tools:text="Mon, 28 Apr 2025 10:25 AM" />
+            app:layout_constraintTop_toTopOf="parent"
+            tools:text="30 Apr 2025" />
 
         <TextView
-            android:id="@+id/locationText"
+            android:id="@+id/timeText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textSize="16sp"
+            app:layout_constraintStart_toEndOf="@id/dateText"
+            app:layout_constraintTop_toTopOf="@id/dateText"
+            app:layout_constraintBottom_toBottomOf="@id/dateText"
+            tools:text="00:33" />
+
+        <TextView
+            android:id="@+id/officeNameText"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
@@ -51,18 +47,8 @@
             android:textSize="14sp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/dateTimeText"
-            tools:text="Main Building, SGGSIE&amp;T Campus" />
-
-        <TextView
-            android:id="@+id/faceConfidenceText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textSize="12sp"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/locationText"
-            tools:text="Face Confidence: 98%" />
+            app:layout_constraintTop_toBottomOf="@id/dateText"
+            tools:text="Main Office" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.google.android.material.card.MaterialCardView> 

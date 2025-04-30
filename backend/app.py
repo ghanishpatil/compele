@@ -47,7 +47,7 @@ def token_required(f):
     return decorated
 
 # Initialize Firebase Admin with your service account
-cred = credentials.Certificate('startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json')
+cred = credentials.Certificate(os.path.join(os.path.dirname(__file__), 'startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json'))
 firebase_admin.initialize_app(cred, {
     'storageBucket': 'startup-cf3fd.firebasestorage.app'  # Updated correct bucket name
 })
@@ -949,11 +949,12 @@ def mark_attendance():
         sevarth_id = data.get('sevarth_id')
         attendance_type = data.get('type')
         verification_confidence = data.get('verification_confidence', 0.0)
+        location_id = data.get('location_id')  # Add location_id field
 
-        logger.info(f"Processing attendance for sevarth_id: {sevarth_id}, type: {attendance_type}")
+        logger.info(f"Processing attendance for sevarth_id: {sevarth_id}, type: {attendance_type}, location: {location_id}")
 
-        if not all([sevarth_id, attendance_type]):
-            logger.error(f"Missing required fields. sevarth_id: {sevarth_id}, type: {attendance_type}")
+        if not all([sevarth_id, attendance_type, location_id]):  # Add location_id to required fields
+            logger.error(f"Missing required fields. sevarth_id: {sevarth_id}, type: {attendance_type}, location_id: {location_id}")
             return jsonify({
                 'message': 'Missing required fields',
                 'success': False
@@ -993,6 +994,20 @@ def mark_attendance():
                 'success': False
             }), 400
 
+        # Get office location details
+        location_ref = db.collection('office_locations').document(location_id)
+        location_doc = location_ref.get()
+        
+        if not location_doc.exists:
+            logger.error(f"Office location not found for id: {location_id}")
+            return jsonify({
+                'message': 'Office location not found',
+                'success': False
+            }), 404
+            
+        location_data = location_doc.to_dict()
+        office_name = location_data.get('name', '')
+
         # Create attendance record
         attendance_data = {
             'sevarthId': sevarth_id,
@@ -1003,6 +1018,8 @@ def mark_attendance():
             'type': attendance_type,
             'status': 'Present',
             'verificationConfidence': verification_confidence,
+            'locationId': location_id,
+            'officeName': office_name,  # Add office name to attendance record
             'timestamp': firestore.SERVER_TIMESTAMP
         }
 

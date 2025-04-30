@@ -18,7 +18,7 @@ public class AttendanceRecord {
     // Additional fields that might be present in other records
     private String sevarthId;
     private String locationId;
-    private String locationName;
+    private String officeName;
     private double latitude;
     private double longitude;
 
@@ -28,7 +28,7 @@ public class AttendanceRecord {
 
     public AttendanceRecord(String id, String date, String status, String time, Timestamp timestamp, 
                           String type, String userId, String userName, double verificationConfidence, 
-                          String sevarthId, String locationId, String locationName, double latitude, double longitude) {
+                          String sevarthId, String locationId, String officeName, double latitude, double longitude) {
         this.id = id;
         this.date = date;
         this.status = status;
@@ -40,7 +40,7 @@ public class AttendanceRecord {
         this.verificationConfidence = verificationConfidence;
         this.sevarthId = sevarthId;
         this.locationId = locationId;
-        this.locationName = locationName;
+        this.officeName = officeName;
         this.latitude = latitude;
         this.longitude = longitude;
     }
@@ -134,12 +134,12 @@ public class AttendanceRecord {
         this.locationId = locationId;
     }
 
-    public String getLocationName() {
-        return locationName;
+    public String getOfficeName() {
+        return officeName;
     }
 
-    public void setLocationName(String locationName) {
-        this.locationName = locationName;
+    public void setOfficeName(String officeName) {
+        this.officeName = officeName;
     }
 
     public double getLatitude() {

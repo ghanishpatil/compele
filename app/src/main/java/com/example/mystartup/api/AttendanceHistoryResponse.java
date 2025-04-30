@@ -58,6 +58,9 @@ public class AttendanceHistoryResponse {
         @SerializedName("verificationConfidence")
         private float verificationConfidence;
         
+        @SerializedName("officeName")
+        private String officeName;
+        
         // Getters and setters
         public String getId() {
             return id;
@@ -121,6 +124,14 @@ public class AttendanceHistoryResponse {
         
         public void setVerificationConfidence(float verificationConfidence) {
             this.verificationConfidence = verificationConfidence;
+        }
+        
+        public String getOfficeName() {
+            return officeName;
+        }
+        
+        public void setOfficeName(String officeName) {
+            this.officeName = officeName;
         }
     }
 } 

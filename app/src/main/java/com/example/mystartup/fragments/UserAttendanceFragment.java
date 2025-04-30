@@ -482,7 +482,7 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
                                         statusText.setText("Verified! Recording attendance...");
                                         
                                         // Mark attendance immediately after verification
-                                        faceRepository.markAttendance(sevarthId, attendanceType, result.getConfidence(),
+                                        faceRepository.markAttendance(sevarthId, attendanceType, result.getConfidence(), locationId,
                                             new FaceRecognitionRepository.RepositoryCallback<AttendanceResponse>() {
                                                 @Override
                                                 public void onSuccess(AttendanceResponse response) {
