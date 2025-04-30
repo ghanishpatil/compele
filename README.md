@@ -1,69 +1,52 @@
-# Sub-Divisional Office Login System
+# MyStartup 2.0
 
-This project consists of an Android app frontend and a Python Flask backend for the Sub-Divisional Office login system.
+A Django web application ready for deployment on Render.
 
-## Backend Setup
+## Local Development
 
-1. Navigate to the backend directory:
-```bash
-cd backend
+1. Create a virtual environment:
 ```
-
-2. Create a virtual environment:
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+venv\Scripts\activate  # On Windows
+source venv/bin/activate  # On Linux/Mac
 ```
 
-3. Install dependencies:
-```bash
+2. Install dependencies:
+```
 pip install -r requirements.txt
 ```
 
-4. Run the Flask server:
-```bash
-python app.py
+3. Run migrations:
+```
+python manage.py migrate
 ```
 
-The backend server will start on http://localhost:5000
+4. Start the development server:
+```
+python manage.py runserver
+```
 
-## Android App Setup
+## Deployment on Render
 
-1. Open the project in Android Studio
+This application is configured for deployment on Render. It uses:
 
-2. Sync the project with Gradle files
+- Gunicorn as the WSGI server
+- WhiteNoise for serving static files
+- dj-database-url for database configuration
 
-3. Update the backend URL in `LoginActivity.java` if needed (default is set to 10.0.2.2:5000 for Android Emulator)
+### Instructions for Deployment on Render
 
-4. Build and run the app
-
-## Test Credentials
-
-- User:
-  - Sevarth ID: user_sevarth
-  - Password: user123
-  - Role: user
-
-- Admin:
-  - Sevarth ID: admin_sevarth
-  - Password: admin123
-  - Role: admin
+1. Push your code to GitHub
+2. Create a new Web Service on Render
+3. Connect your GitHub repository
+4. Set the build command to: `pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate`
+5. Set the start command to: `gunicorn mystartup.wsgi:application`
+6. Add environment variables:
+   - `SECRET_KEY` (generate a secure random key)
+   - `DATABASE_URL` (if using a database)
 
 ## Features
 
-- Role-based login (User/Admin)
-- Secure password handling
-- JWT token-based authentication
-- Modern Material Design UI
-- Error handling and validation
-- Network state handling
-
-## Security Notes
-
-For production deployment:
-- Use HTTPS
-- Implement proper session management
-- Store sensitive data securely
-- Use environment variables for configuration
-- Implement rate limiting
-- Add proper logging and monitoring 
+- Ready for deployment on Render
+- Static file handling with WhiteNoise
+- Database configuration for deployment 
