@@ -243,73 +243,58 @@ def login():
             try:
                 # For testing purposes, construct email from sevarth_id
                 email = f"{sevarth_id}@example.com"
-                firebase_user = auth.get_user_by_email(email)
                 
-                # Get existing user data
-                user_ref = db.collection('users').where('uid', '==', firebase_user.uid).limit(1)
-                users = list(user_ref.stream())
-                
-                if not users:
-                    print(f"User not found with uid={firebase_user.uid}")
-                    return jsonify({'message': 'User not found'}), 404
-                
-                user_doc = users[0]
-                user_data = user_doc.to_dict()
-                
-                # Create a custom token
-                custom_token = auth.create_custom_token(firebase_user.uid)
-                
-                # Prepare user response
-                user_response = {
-                    'sevarth_id': sevarth_id,
-                    'email': user_data.get('email'),
-                    'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
-                    'role': 'user'
-                }
-
-                print(f"User login successful for {sevarth_id}")
-                return jsonify({
-                    'token': custom_token.decode(),
-                    'user': user_response,
-                    'message': 'Login successful'
-                })
-                
-            except auth.UserNotFoundError:
-                # Create the user if they don't exist
                 try:
-                    # If names weren't provided, extract from sevarth_id or use defaults
-                    if not first_name or not last_name:
-                        # Try to extract name from sevarth_id (assuming format: firstname_lastname)
-                        name_parts = sevarth_id.split('_')
-                        if len(name_parts) >= 2:
-                            first_name = name_parts[0].capitalize()
-                            last_name = name_parts[1].capitalize()
-                        else:
-                            # Use sevarth_id as first name if no clear name format
-                            first_name = sevarth_id
-                            last_name = ""
+                    # Try to get the user from Firebase Auth
+                    firebase_user = auth.get_user_by_email(email)
                     
-                    # Create user in Firebase Auth
-                    firebase_user = auth.create_user(
-                        email=email,
-                        password=password,
-                        display_name=f"{first_name} {last_name}".strip()
-                    )
+                    # First try to find user by UID
+                    user_ref = db.collection('users').where('uid', '==', firebase_user.uid).limit(1)
+                    users = list(user_ref.stream())
                     
-                    # Create user document in Firestore
-                    user_data = {
-                        'uid': firebase_user.uid,
-                        'sevarthId': sevarth_id,
-                        'email': email,
-                        'firstName': first_name,
-                        'lastName': last_name,
-                        'role': 'user',
-                        'createdAt': firestore.SERVER_TIMESTAMP
-                    }
+                    # If not found by UID, try finding by sevarth_id
+                    if not users:
+                        print(f"User not found with uid={firebase_user.uid}, trying to find by sevarthId")
+                        user_doc = db.collection('users').document(sevarth_id).get()
+                        
+                        if user_doc.exists:
+                            user_data = user_doc.to_dict()
+                            
+                            # If the document doesn't have a UID, update it
+                            if 'uid' not in user_data:
+                                user_data['uid'] = firebase_user.uid
+                                db.collection('users').document(sevarth_id).set(user_data)
+                                
+                                # Also create a document with UID as ID
+                                db.collection('users').document(firebase_user.uid).set(user_data)
+                                
+                                print(f"Updated user {sevarth_id} with UID {firebase_user.uid}")
+                            
+                            # Create a custom token
+                            custom_token = auth.create_custom_token(firebase_user.uid)
+                            
+                            # Prepare user response
+                            user_response = {
+                                'sevarth_id': sevarth_id,
+                                'email': user_data.get('email'),
+                                'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
+                                'role': 'user'
+                            }
+                            
+                            print(f"User login successful for {sevarth_id} (found by sevarthId)")
+                            return jsonify({
+                                'token': custom_token.decode(),
+                                'user': user_response,
+                                'message': 'Login successful'
+                            })
+                        
+                        # Still can't find the user
+                        print(f"User not found with sevarthId={sevarth_id}")
+                        return jsonify({'message': 'User not found'}), 404
                     
-                    # Store in Firestore
-                    db.collection('users').document(firebase_user.uid).set(user_data)
-                    print(f"Created new user: {user_data}")
+                    # User found by UID
+                    user_doc = users[0]
+                    user_data = user_doc.to_dict()
                     
                     # Create a custom token
                     custom_token = auth.create_custom_token(firebase_user.uid)
@@ -317,20 +302,121 @@ def login():
                     # Prepare user response
                     user_response = {
                         'sevarth_id': sevarth_id,
-                        'email': email,
-                        'name': f"{first_name} {last_name}".strip(),
+                        'email': user_data.get('email'),
+                        'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
                         'role': 'user'
                     }
                     
+                    print(f"User login successful for {sevarth_id}")
                     return jsonify({
                         'token': custom_token.decode(),
                         'user': user_response,
-                        'message': 'User created and logged in successfully'
+                        'message': 'Login successful'
                     })
-                    
-                except Exception as e:
-                    print(f"Error creating user: {str(e)}")
-                    return jsonify({'message': f'Error creating user: {str(e)}'}), 500
+                
+                except auth.UserNotFoundError:
+                    # Create the user if they don't exist
+                    try:
+                        # If names weren't provided, extract from sevarth_id or use defaults
+                        if not first_name or not last_name:
+                            # Try to extract name from sevarth_id (assuming format: firstname_lastname)
+                            name_parts = sevarth_id.split('_')
+                            if len(name_parts) >= 2:
+                                first_name = name_parts[0].capitalize()
+                                last_name = name_parts[1].capitalize()
+                            else:
+                                # Use sevarth_id as first name if no clear name format
+                                first_name = sevarth_id
+                                last_name = ""
+                        
+                        # Check if user exists in Firestore
+                        user_doc = db.collection('users').document(sevarth_id).get()
+                        
+                        if user_doc.exists:
+                            user_data = user_doc.to_dict()
+                            
+                            # Create user in Firebase Auth if it doesn't already exist
+                            firebase_user = auth.create_user(
+                                email=email,
+                                password=password,
+                                display_name=f"{user_data.get('firstName', first_name)} {user_data.get('lastName', last_name)}".strip()
+                            )
+                            
+                            # Update the user document with UID
+                            user_data['uid'] = firebase_user.uid
+                            db.collection('users').document(sevarth_id).set(user_data)
+                            
+                            # Also create a document with UID as ID
+                            db.collection('users').document(firebase_user.uid).set(user_data)
+                            
+                            # Create a custom token
+                            custom_token = auth.create_custom_token(firebase_user.uid)
+                            
+                            # Prepare user response
+                            user_response = {
+                                'sevarth_id': sevarth_id,
+                                'email': user_data.get('email'),
+                                'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
+                                'role': 'user'
+                            }
+                            
+                            print(f"User linked and logged in successfully: {sevarth_id}")
+                            return jsonify({
+                                'token': custom_token.decode(),
+                                'user': user_response,
+                                'message': 'Login successful'
+                            })
+                        else:
+                            # Create brand new user in both Firebase Auth and Firestore
+                            firebase_user = auth.create_user(
+                                email=email,
+                                password=password,
+                                display_name=f"{first_name} {last_name}".strip()
+                            )
+                            
+                            # Create user document in Firestore with both IDs
+                            user_data = {
+                                'uid': firebase_user.uid,
+                                'sevarthId': sevarth_id,
+                                'email': email,
+                                'firstName': first_name,
+                                'lastName': last_name,
+                                'role': 'user',
+                                'createdAt': firestore.SERVER_TIMESTAMP
+                            }
+                            
+                            # Store in Firestore with sevarth_id as document ID
+                            db.collection('users').document(sevarth_id).set(user_data)
+                            
+                            # Also store with UID as document ID
+                            db.collection('users').document(firebase_user.uid).set(user_data)
+                            
+                            print(f"Created new user: {user_data}")
+                            
+                            # Create a custom token
+                            custom_token = auth.create_custom_token(firebase_user.uid)
+                            
+                            # Prepare user response
+                            user_response = {
+                                'sevarth_id': sevarth_id,
+                                'email': email,
+                                'name': f"{first_name} {last_name}".strip(),
+                                'role': 'user'
+                            }
+                            
+                            return jsonify({
+                                'token': custom_token.decode(),
+                                'user': user_response,
+                                'message': 'User created and logged in successfully'
+                            })
+                        
+                    except Exception as e:
+                        print(f"Error creating user: {str(e)}")
+                        return jsonify({'message': f'Error creating user: {str(e)}'}), 500
+                        
+            except Exception as e:
+                print(f"Error during user login: {str(e)}")
+                return jsonify({'message': f'Error during login: {str(e)}'}), 500
 
     except Exception as e:
         print(f"Error during login: {str(e)}")
@@ -950,10 +1036,16 @@ def mark_attendance():
         attendance_type = data.get('type')
         verification_confidence = data.get('verification_confidence', 0.0)
         location_id = data.get('location_id')  # Add location_id field
-
+        
+        # Get optional client-provided values
+        client_user_id = data.get('uid')
+        client_user_name = data.get('user_name')
+        
         logger.info(f"Processing attendance for sevarth_id: {sevarth_id}, type: {attendance_type}, location: {location_id}")
+        logger.debug(f"Client provided user_id: {client_user_id}, user_name: {client_user_name}")
 
-        if not all([sevarth_id, attendance_type, location_id]):  # Add location_id to required fields
+        # Only require sevarth_id, type and location_id as essential fields
+        if not all([sevarth_id, attendance_type, location_id]):
             logger.error(f"Missing required fields. sevarth_id: {sevarth_id}, type: {attendance_type}, location_id: {location_id}")
             return jsonify({
                 'message': 'Missing required fields',
@@ -967,46 +1059,52 @@ def mark_attendance():
                 'success': False
             }), 400
 
-        # Get current date and time
-        now = datetime.datetime.now()
+        # Get current date and time in IST (UTC+5:30)
+        now = datetime.datetime.now() + datetime.timedelta(hours=5, minutes=30)
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M:%S")
+        
+        # Variable to store user data
+        user_name = client_user_name
+        uid = client_user_id
+        
+        # If client didn't provide complete user data, try to fetch from Firestore
+        if not uid or not user_name:
+            logger.info(f"Client did not provide complete user data, fetching from Firestore")
+            # Get user details from Firestore by sevarthId
+            users_ref = db.collection('users').where('sevarthId', '==', sevarth_id).limit(1)
+            users = users_ref.get()
 
-        # Get user details from Firestore
-        users_ref = db.collection('users').where('sevarthId', '==', sevarth_id).limit(1)
-        users = users_ref.get()
-
-        if not users or len(users) == 0:
-            logger.error(f"User not found for sevarth_id: {sevarth_id}")
-            return jsonify({
-                'message': 'User not found',
-                'success': False
-            }), 404
-
-        user_data = users[0].to_dict()
-        user_name = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip()
-        uid = user_data.get('uid', '')
-
-        if not uid:
-            logger.error(f"User UID not found for sevarth_id: {sevarth_id}")
-            return jsonify({
-                'message': 'User data incomplete',
-                'success': False
-            }), 400
+            if not users or len(users) == 0:
+                logger.warning(f"User not found by sevarthId: {sevarth_id}, will continue anyway")
+                # We'll use fallback values
+                if not user_name:
+                    user_name = "Unknown User"
+                
+                if not uid:
+                    uid = f"unknown_{sevarth_id}" # Create a fallback placeholder
+            else:
+                user_data = users[0].to_dict()
+                
+                # Use Firestore data if client didn't provide
+                if not user_name:
+                    user_name = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip()
+                    if not user_name:
+                        user_name = "Unknown User"
+                
+                if not uid:
+                    uid = user_data.get('uid', f"unknown_{sevarth_id}")
 
         # Get office location details
         location_ref = db.collection('office_locations').document(location_id)
         location_doc = location_ref.get()
         
-        if not location_doc.exists:
-            logger.error(f"Office location not found for id: {location_id}")
-            return jsonify({
-                'message': 'Office location not found',
-                'success': False
-            }), 404
-            
-        location_data = location_doc.to_dict()
-        office_name = location_data.get('name', '')
+        office_name = "Unknown Office"
+        if location_doc.exists:
+            location_data = location_doc.to_dict()
+            office_name = location_data.get('name', 'Unknown Office')
+        else:
+            logger.warning(f"Office location not found for id: {location_id}, using default name")
 
         # Create attendance record
         attendance_data = {
@@ -1019,7 +1117,7 @@ def mark_attendance():
             'status': 'Present',
             'verificationConfidence': verification_confidence,
             'locationId': location_id,
-            'officeName': office_name,  # Add office name to attendance record
+            'officeName': office_name,
             'timestamp': firestore.SERVER_TIMESTAMP
         }
 
@@ -1108,6 +1206,16 @@ def get_attendance_history():
         for doc in attendance_docs:
             record = doc.to_dict()
             record['id'] = doc.id
+            
+            # Make sure time is in IST if it needs conversion
+            # Note: Our mark_attendance function now stores times in IST directly
+            # This is just a safety check for legacy records
+            if 'timestamp' in record and isinstance(record['timestamp'], datetime.datetime):
+                # Convert to IST for any legacy records that might be using UTC
+                ist_time = record['timestamp'] + datetime.timedelta(hours=5, minutes=30)
+                record['time'] = ist_time.strftime("%H:%M:%S")
+                record['date'] = ist_time.strftime("%Y-%m-%d")
+            
             attendance_records.append(record)
         
         return jsonify({

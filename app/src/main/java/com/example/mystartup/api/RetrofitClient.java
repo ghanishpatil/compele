@@ -10,8 +10,8 @@ import retrofit2.converter.gson.GsonConverterFactory;
  * Singleton class to manage Retrofit instance
  */
 public class RetrofitClient {
-    // Using your computer's actual IP address
-    private static final String BASE_URL = "http://192.168.4.109:5000/";
+    // Updated to AWS backend URL
+    private static final String BASE_URL = "http://face-recognition-lb-297173275.eu-north-1.elb.amazonaws.com/";
     
     private static RetrofitClient instance = null;
     private final Retrofit retrofit;

@@ -1,0 +1,12 @@
+version: '3'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+    volumes:
+      - ./.env:/app/.env
+      - ./startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json:/app/startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json 

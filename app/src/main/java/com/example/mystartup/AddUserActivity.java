@@ -67,6 +67,7 @@ public class AddUserActivity extends AppCompatActivity {
     private static final String PREF_NAME = "AuthPrefs";
     private static final String KEY_EMAIL = "email";
     private static final String KEY_PASSWORD = "password";
+    private static final String KEY_AUTH_TOKEN = "auth_token";
     private String capturedImagePath;
     private Uri selectedImageUri;
     
@@ -482,7 +483,53 @@ public class AddUserActivity extends AppCompatActivity {
         Log.d(TAG, "Saving user data for " + (editId != null ? "editing" : "creating") + 
               " user with Sevarth ID: " + sevarthId);
         
-        proceedWithUserCreation(sevarthId, firstName, lastName, gender, dob, phone, email, additionalData);
+        // If we're creating a new user, first create in Firebase Authentication
+        if (editId == null && !password.isEmpty()) {
+            // Check if the email is already formatted properly
+            if (!email.contains("@")) {
+                // Format email as required (use sevarth_id as username)
+                email = sevarthId + "@example.com";
+            }
+            
+            // Create a final copy of the input data to be used in lambda
+            final String finalEmail = email;
+            final Map<String, Object> finalAdditionalData = new HashMap<>(additionalData);
+            
+            // Create the user in Firebase Authentication
+            mAuth.createUserWithEmailAndPassword(email, password)
+                .addOnSuccessListener(authResult -> {
+                    // User created successfully in Authentication
+                    FirebaseUser firebaseUser = authResult.getUser();
+                    if (firebaseUser != null) {
+                        // Update display name
+                        firebaseUser.updateProfile(new com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                                .setDisplayName(firstName + " " + lastName)
+                                .build())
+                                .addOnSuccessListener(aVoid -> {
+                                    Log.d(TAG, "User display name updated successfully");
+                                })
+                                .addOnFailureListener(e -> {
+                                    Log.e(TAG, "Error updating user display name", e);
+                                });
+                        
+                        // Set the UID in the additional data
+                        finalAdditionalData.put("uid", firebaseUser.getUid());
+                        
+                        // Continue with user creation
+                        proceedWithUserCreation(sevarthId, firstName, lastName, gender, dob, phone, finalEmail, finalAdditionalData);
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    // Failed to create user in Authentication
+                    Log.e(TAG, "Error creating user in Firebase Authentication", e);
+                    Toast.makeText(AddUserActivity.this, "Failed to create user: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    binding.nextButton.setEnabled(true);
+                    binding.cancelButton.setEnabled(true);
+                });
+        } else {
+            // For editing, just proceed with the update
+            proceedWithUserCreation(sevarthId, firstName, lastName, gender, dob, phone, email, additionalData);
+        }
     }
 
     private void proceedWithUserCreation(String sevarthId, String firstName, String lastName, 
@@ -515,66 +562,142 @@ public class AddUserActivity extends AppCompatActivity {
             userData.put("createdBy", adminId);
         }
 
-        // Handle different image sources
-        if (selectedImageUri != null) {
-            // User selected an image from gallery
-            try {
-                File imageFile = createFileFromUri(selectedImageUri, sevarthId);
-                if (imageFile != null && imageFile.exists()) {
-                    uploadImageAndSaveUser(imageFile, sevarthId, userData);
-                } else {
-                    Toast.makeText(this, "Failed to process selected image", Toast.LENGTH_SHORT).show();
-                    saveUserToFirestore(userData, sevarthId);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error processing selected image: " + e.getMessage(), e);
-                Toast.makeText(this, "Error processing image: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                saveUserToFirestore(userData, sevarthId);
+        // If Firebase Auth UID is not set yet (common when adding through API), try to use the backend API
+        if (!userData.containsKey("uid") && editId == null) {
+            // Get API auth token
+            String authToken = getAuthToken();
+            
+            if (authToken != null && !authToken.isEmpty()) {
+                // Try to register via the API
+                registerViaApi(sevarthId, firstName, lastName, gender, dob, phone, email, userData);
+            } else {
+                // No auth token available, try to continue with just Firestore
+                Log.w(TAG, "No auth token available. User may not have proper Firebase Authentication.");
+                
+                // Try to still create the user, but the backend API may require authentication later
+                processImagesAndSaveUser(userData, sevarthId);
             }
-        } else if (additionalData.containsKey("facePath") && additionalData.get("facePath") != null) {
-            // We have a captured face image
-            String localPath = (String) additionalData.get("facePath");
-            File imageFile = new File(localPath);
+        } else {
+            // Already have a UID or editing an existing user, proceed normally
+            processImagesAndSaveUser(userData, sevarthId);
+        }
+    }
+
+    private String getAuthToken() {
+        // Get token from SharedPreferences
+        return prefs.getString(KEY_AUTH_TOKEN, null);
+    }
+
+    private void registerViaApi(String sevarthId, String firstName, String lastName, 
+                              String gender, String dob, String phone, String email,
+                              Map<String, Object> userData) {
+        
+        // Get API Service from RetrofitClient
+        com.example.mystartup.api.ApiService apiService = 
+            com.example.mystartup.api.RetrofitClient.getInstance().getApiService();
+        
+        // Create request object
+        com.example.mystartup.api.AdminRegistrationRequest request = 
+            new com.example.mystartup.api.AdminRegistrationRequest(
+                sevarthId, 
+                firstName, 
+                lastName, 
+                gender, 
+                dob, 
+                phone, 
+                email,
+                selectedLocationIds.size() > 0 ? new ArrayList<>(selectedLocationIds).get(0) : "",
+                selectedLocationNames.size() > 0 ? new ArrayList<>(selectedLocationNames).get(0) : "",
+                binding.passwordEditText.getText().toString().trim()
+            );
+        
+        // Get auth token for API call
+        String authToken = "Bearer " + getAuthToken();
+        
+        // Call API
+        apiService.registerUser(authToken, request)
+            .enqueue(new retrofit2.Callback<com.example.mystartup.api.AdminRegistrationResponse>() {
+                @Override
+                public void onResponse(retrofit2.Call<com.example.mystartup.api.AdminRegistrationResponse> call, 
+                                     retrofit2.Response<com.example.mystartup.api.AdminRegistrationResponse> response) {
+                    if (response.isSuccessful() && response.body() != null) {
+                        if (response.body().isSuccess()) {
+                            // Success! API created the user
+                            Log.d(TAG, "User created via API: " + sevarthId);
+                            
+                            // Get the user ID and use it
+                            String userId = response.body().getUserId();
+                            if (userId != null && !userId.isEmpty()) {
+                                userData.put("uid", userId);
+                            }
+                            
+                            // Continue with image processing and saving to Firestore
+                            processImagesAndSaveUser(userData, sevarthId);
+                        } else {
+                            // API reported an error
+                            String errorMessage = response.body().getMessage();
+                            Log.e(TAG, "API reported error: " + errorMessage);
+                            Toast.makeText(AddUserActivity.this, "Error: " + errorMessage, Toast.LENGTH_LONG).show();
+                            binding.nextButton.setEnabled(true);
+                            binding.cancelButton.setEnabled(true);
+                        }
+                    } else {
+                        // HTTP error
+                        try {
+                            String errorBody = response.errorBody() != null ? 
+                                response.errorBody().string() : "Unknown error";
+                            Log.e(TAG, "API error: " + errorBody);
+                            Toast.makeText(AddUserActivity.this, "API Error: " + errorBody, Toast.LENGTH_LONG).show();
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error parsing API error", e);
+                        }
+                        binding.nextButton.setEnabled(true);
+                        binding.cancelButton.setEnabled(true);
+                    }
+                }
+                
+                @Override
+                public void onFailure(retrofit2.Call<com.example.mystartup.api.AdminRegistrationResponse> call, Throwable t) {
+                    // Network or other error
+                    Log.e(TAG, "API call failed", t);
+                    Toast.makeText(AddUserActivity.this, "Network error: " + t.getMessage(), Toast.LENGTH_LONG).show();
+                    
+                    // Fall back to just saving to Firestore
+                    Log.d(TAG, "Falling back to direct Firestore save without API");
+                    processImagesAndSaveUser(userData, sevarthId);
+                }
+            });
+    }
+
+    // New helper method to organize the code better
+    private void processImagesAndSaveUser(Map<String, Object> userData, String sevarthId) {
+        // Handle different image sources
+        if (capturedImagePath != null) {
+            // Image from camera
+            File imageFile = new File(capturedImagePath);
             if (imageFile.exists()) {
+                Log.d(TAG, "Using camera captured image: " + capturedImagePath);
                 uploadImageAndSaveUser(imageFile, sevarthId, userData);
             } else {
-                // No image or image file doesn't exist, just save the user data
+                Log.e(TAG, "Captured image file not found: " + capturedImagePath);
+                saveUserToFirestore(userData, sevarthId);
+            }
+        } else if (selectedImageUri != null) {
+            // Image from gallery
+            try {
+                Log.d(TAG, "Using gallery image: " + selectedImageUri);
+                File tempFile = File.createTempFile("gallery_", ".jpg", getCacheDir());
+                copyUriToFile(selectedImageUri, tempFile);
+                uploadImageAndSaveUser(tempFile, sevarthId, userData);
+            } catch (IOException e) {
+                Log.e(TAG, "Error creating temp file for gallery image", e);
                 saveUserToFirestore(userData, sevarthId);
             }
         } else {
-            // No image to upload, just save the user
+            // No image, just save the user data
+            Log.d(TAG, "No image provided, saving user data only");
             saveUserToFirestore(userData, sevarthId);
         }
-    }
-    
-    private File createFileFromUri(Uri uri, String sevarthId) throws IOException {
-        // Create a directory for reference images if it doesn't exist
-        File mediaDir = new File(getExternalFilesDir(null), "reference_images");
-        if (!mediaDir.exists()) {
-            mediaDir.mkdirs();
-        }
-        
-        // Create a file with the proper naming convention
-        File destinationFile = new File(mediaDir, "face_" + sevarthId + ".jpg");
-        
-        // Copy the content from the URI to the file
-        InputStream inputStream = getContentResolver().openInputStream(uri);
-        if (inputStream == null) {
-            return null;
-        }
-        
-        OutputStream outputStream = new FileOutputStream(destinationFile);
-        byte[] buffer = new byte[4096];
-        int bytesRead;
-        
-        while ((bytesRead = inputStream.read(buffer)) != -1) {
-            outputStream.write(buffer, 0, bytesRead);
-        }
-        
-        outputStream.close();
-        inputStream.close();
-        
-        return destinationFile;
     }
 
     private void uploadImageAndSaveUser(File imageFile, String sevarthId, Map<String, Object> userData) {
@@ -669,6 +792,11 @@ public class AddUserActivity extends AppCompatActivity {
             userData.put("updatedAt", System.currentTimeMillis());
         } else {
             Log.d(TAG, "Creating new user with Sevarth ID: " + sevarthId);
+            
+            // Make sure we have the uid field set
+            if (!userData.containsKey("uid")) {
+                Log.w(TAG, "No UID found in user data. User might not be properly authenticated.");
+            }
         }
     
         // Save to Firestore
@@ -677,6 +805,25 @@ public class AddUserActivity extends AppCompatActivity {
             .set(userData)
             .addOnSuccessListener(aVoid -> {
                 String message = editId != null ? "User updated successfully" : "User created successfully";
+                
+                // CRITICAL: Also save a duplicate document with UID as document ID
+                // This ensures the user can be found by both sevarthId and UID
+                if (userData.containsKey("uid")) {
+                    String uid = (String) userData.get("uid");
+                    if (uid != null && !uid.isEmpty()) {
+                        // Save the same data with UID as the document ID
+                        db.collection("users")
+                            .document(uid)
+                            .set(userData)
+                            .addOnSuccessListener(aVoid2 -> {
+                                Log.d(TAG, "User data also saved with UID as document ID: " + uid);
+                            })
+                            .addOnFailureListener(e -> {
+                                Log.e(TAG, "Error saving user data with UID as document ID", e);
+                            });
+                    }
+                }
+                
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
                 setResult(RESULT_OK);
                 finish();
@@ -687,5 +834,24 @@ public class AddUserActivity extends AppCompatActivity {
                 Log.e(TAG, "Error " + (editId != null ? "updating" : "creating") + " user", e);
                 Toast.makeText(this, "Failed to " + (editId != null ? "update" : "create") + " user: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             });
+    }
+
+    // Helper method to copy content from a URI to a file
+    private void copyUriToFile(Uri uri, File destinationFile) throws IOException {
+        InputStream inputStream = getContentResolver().openInputStream(uri);
+        if (inputStream == null) {
+            throw new IOException("Failed to open input stream for URI: " + uri);
+        }
+        
+        OutputStream outputStream = new FileOutputStream(destinationFile);
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            outputStream.write(buffer, 0, bytesRead);
+        }
+        
+        outputStream.close();
+        inputStream.close();
     }
 } 

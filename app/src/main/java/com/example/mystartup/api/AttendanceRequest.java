@@ -18,11 +18,29 @@ public class AttendanceRequest {
     @SerializedName("location_id")
     private String locationId;
     
+    @SerializedName("user_name")
+    private String userName;
+    
+    @SerializedName("uid")
+    private String userId;
+    
+    // Simple constructor for backward compatibility
     public AttendanceRequest(String sevarthId, String type, float verificationConfidence, String locationId) {
         this.sevarthId = sevarthId;
         this.type = type;
         this.verificationConfidence = verificationConfidence;
         this.locationId = locationId;
+    }
+    
+    // Complete constructor with all fields
+    public AttendanceRequest(String sevarthId, String type, float verificationConfidence, 
+                            String locationId, String userName, String userId) {
+        this.sevarthId = sevarthId;
+        this.type = type;
+        this.verificationConfidence = verificationConfidence;
+        this.locationId = locationId;
+        this.userName = userName;
+        this.userId = userId;
     }
     
     public String getSevarthId() {
@@ -55,5 +73,21 @@ public class AttendanceRequest {
     
     public void setLocationId(String locationId) {
         this.locationId = locationId;
+    }
+    
+    public String getUserName() {
+        return userName;
+    }
+    
+    public void setUserName(String userName) {
+        this.userName = userName;
+    }
+    
+    public String getUserId() {
+        return userId;
+    }
+    
+    public void setUserId(String userId) {
+        this.userId = userId;
     }
 } 

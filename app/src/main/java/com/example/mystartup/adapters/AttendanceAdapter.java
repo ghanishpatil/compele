@@ -15,14 +15,29 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.example.mystartup.R;
 import com.example.mystartup.models.AttendanceRecord;
 
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 
 public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.AttendanceViewHolder> {
-    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("EEE, dd MMM yyyy", Locale.US);
-    private static final SimpleDateFormat TIME_FORMAT = new SimpleDateFormat("hh:mm a", Locale.US);
+    private static final String TAG = "AttendanceAdapter";
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+    // Use a format for parsing the time from the database
+    private static final SimpleDateFormat TIME_PARSER = new SimpleDateFormat("HH:mm:ss", Locale.US);
+    // Use a format for displaying the time in 12-hour format
+    private static final SimpleDateFormat TIME_DISPLAY_FORMAT = new SimpleDateFormat("hh:mm a", Locale.US);
+    
+    // Initialize timezone for India
+    static {
+        TimeZone istTimeZone = TimeZone.getTimeZone("Asia/Kolkata");
+        DATE_FORMAT.setTimeZone(istTimeZone);
+        TIME_PARSER.setTimeZone(istTimeZone);
+        TIME_DISPLAY_FORMAT.setTimeZone(istTimeZone);
+    }
     
     private final Context context;
     private final List<AttendanceRecord> allRecords;
@@ -122,8 +137,26 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
             // Set date
             dateText.setText(record.getDate());
             
-            // Set time
-            timeText.setText(record.getTime());
+            // Format and set time in IST
+            String timeString = record.getTime();
+            try {
+                if (timeString != null && !timeString.isEmpty()) {
+                    // Parse the time string from the record
+                    Date timeDate = TIME_PARSER.parse(timeString);
+                    if (timeDate != null) {
+                        // Format the time for display
+                        timeText.setText(TIME_DISPLAY_FORMAT.format(timeDate));
+                    } else {
+                        // Fallback to original time if parsing fails
+                        timeText.setText(timeString);
+                    }
+                } else {
+                    timeText.setText("--:--");
+                }
+            } catch (ParseException e) {
+                // If parsing fails, use the original time string
+                timeText.setText(timeString);
+            }
             
             // Set office name
             String officeName = record.getOfficeName();

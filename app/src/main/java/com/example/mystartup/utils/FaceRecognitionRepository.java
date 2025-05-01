@@ -128,35 +128,148 @@ public class FaceRecognitionRepository {
      * @param attendanceType Either "check_in" or "check_out"
      * @param confidence Verification confidence (0-1)
      * @param locationId ID of the office location
+     * @param userName User's name
+     * @param userId User's Firebase UID
      * @param callback Callback for the result
      */
     public void markAttendance(String sevarthId, String attendanceType, float confidence, 
-                             String locationId, RepositoryCallback<AttendanceResponse> callback) {
-        // Create request
-        AttendanceRequest request = new AttendanceRequest(sevarthId, attendanceType, confidence, locationId);
+                             String locationId, String userName, String userId,
+                             RepositoryCallback<AttendanceResponse> callback) {
+        // Log request details for debugging
+        Log.d(TAG, "Marking attendance with: sevarthId=" + sevarthId + 
+                ", attendanceType=" + attendanceType + 
+                ", confidence=" + confidence + 
+                ", locationId=" + locationId + 
+                ", userName=" + userName + 
+                ", userId=" + userId);
+        
+        // Add fallback values if data is missing
+        if (userName == null || userName.isEmpty()) {
+            userName = "User"; // Default name if missing
+            Log.w(TAG, "Using default user name because actual name is missing");
+        }
+        
+        if (userId == null || userId.isEmpty()) {
+            // Check if we can get the userId from Firebase Auth
+            try {
+                com.google.firebase.auth.FirebaseUser currentUser = 
+                    com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser();
+                if (currentUser != null) {
+                    userId = currentUser.getUid();
+                    Log.d(TAG, "Retrieved user ID from Firebase Auth: " + userId);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error getting current Firebase user: " + e.getMessage());
+                // We'll continue with null userId, the server should handle it
+            }
+        }
+        
+        // Create request with complete user data
+        AttendanceRequest request = new AttendanceRequest(sevarthId, attendanceType, confidence, 
+                                                         locationId, userName, userId);
         
         // Call API
         apiService.markAttendance(request).enqueue(new Callback<AttendanceResponse>() {
             @Override
             public void onResponse(Call<AttendanceResponse> call, Response<AttendanceResponse> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    callback.onSuccess(response.body());
-                } else {
-                    try {
-                        callback.onError(response.errorBody() != null 
-                                ? response.errorBody().string() 
-                                : "Unknown error");
-                    } catch (IOException e) {
-                        callback.onError("Failed to parse error response");
+                // Log full response for debugging
+                Log.d(TAG, "Server response code: " + response.code());
+                try {
+                    if (response.isSuccessful() && response.body() != null) {
+                        // Log the entire response object
+                        Log.d(TAG, "Attendance response: " + response.body().toString());
+                        
+                        // Check if response indicates error even though HTTP code was success
+                        if (response.body().isError()) {
+                            Log.e(TAG, "Error response with success HTTP code: " + response.body().getMessage());
+                            callback.onError(response.body().getMessage());
+                        } else {
+                            Log.d(TAG, "Attendance marked successfully: " + response.body().getMessage());
+                            callback.onSuccess(response.body());
+                        }
+                    } else {
+                        String errorJson = response.errorBody() != null ? response.errorBody().string() : "Unknown error";
+                        Log.e(TAG, "Error marking attendance: " + errorJson);
+                        
+                        // Try to extract a more user-friendly error message
+                        String errorMessage = extractErrorMessage(errorJson);
+                        callback.onError(errorMessage);
                     }
+                } catch (IOException e) {
+                    Log.e(TAG, "Failed to parse error response", e);
+                    callback.onError("Network error: " + e.getMessage());
                 }
             }
             
             @Override
             public void onFailure(Call<AttendanceResponse> call, Throwable t) {
-                callback.onError(t.getMessage());
+                Log.e(TAG, "Network failure marking attendance", t);
+                callback.onError("Network error: " + t.getMessage());
             }
         });
+    }
+    
+    /**
+     * Extract a user-friendly error message from the error JSON
+     */
+    private String extractErrorMessage(String errorJson) {
+        if (errorJson == null || errorJson.isEmpty()) {
+            return "Unknown error occurred";
+        }
+        
+        try {
+            // Don't show "User data incomplete" message anymore - handle this on the client side
+            if (errorJson.contains("User data incomplete")) {
+                return "Server error while processing your request. Please try again.";
+            }
+            
+            // Don't propagate IP-related errors to the user
+            if (errorJson.contains("IP") || errorJson.contains("ip address") || 
+                errorJson.contains("network") || errorJson.contains("location")) {
+                return "Server error. Please try again.";
+            }
+            
+            // Try to parse as JSON and extract message
+            if (errorJson.contains("message") && errorJson.contains("success")) {
+                // Extract the message field from the JSON
+                int messageStart = errorJson.indexOf("\"message\"");
+                if (messageStart >= 0) {
+                    int valueStart = errorJson.indexOf(":", messageStart) + 1;
+                    int valueEnd = errorJson.indexOf(",", valueStart);
+                    if (valueEnd < 0) {
+                        valueEnd = errorJson.indexOf("}", valueStart);
+                    }
+                    if (valueStart >= 0 && valueEnd >= 0) {
+                        String message = errorJson.substring(valueStart, valueEnd).trim();
+                        // Remove quotes
+                        if (message.startsWith("\"") && message.endsWith("\"")) {
+                            message = message.substring(1, message.length() - 1);
+                        }
+                        return message;
+                    }
+                }
+            }
+            
+            return "Server error: " + errorJson;
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing error message", e);
+            return "Error processing server response";
+        }
+    }
+    
+    /**
+     * Mark attendance (backward compatibility method)
+     * 
+     * @param sevarthId User's Sevarth ID
+     * @param attendanceType Either "check_in" or "check_out"
+     * @param confidence Verification confidence (0-1)
+     * @param locationId ID of the office location
+     * @param callback Callback for the result
+     */
+    public void markAttendance(String sevarthId, String attendanceType, float confidence, 
+                             String locationId, RepositoryCallback<AttendanceResponse> callback) {
+        // Call the complete method with empty values for user name and ID
+        markAttendance(sevarthId, attendanceType, confidence, locationId, "", "", callback);
     }
     
     /**

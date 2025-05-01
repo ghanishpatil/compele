@@ -56,6 +56,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.UUID;
+import java.util.TimeZone;
 
 /**
  * Face Recognition System for attendance verification
@@ -601,22 +602,35 @@ public class FaceRecognitionSystem {
             return;
         }
         
-        // Get current date and time
+        // Get current date and time in IST
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
         SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss", Locale.US);
-        String currentDate = dateFormat.format(new Date());
-        String currentTime = timeFormat.format(new Date());
+        
+        // Set Indian Standard Time timezone (IST = UTC+5:30)
+        TimeZone istTimeZone = TimeZone.getTimeZone("Asia/Kolkata");
+        dateFormat.setTimeZone(istTimeZone);
+        timeFormat.setTimeZone(istTimeZone);
+        
+        Date currentDate = new Date(); // Get current device time
+        String formattedDate = dateFormat.format(currentDate);
+        String formattedTime = timeFormat.format(currentDate);
+        
+        Log.d(TAG, "markAttendance: Using device time in IST: " + currentDate.toString() + 
+              ", Formatted as " + formattedDate + " " + formattedTime);
         
         // Create attendance record
         Map<String, Object> attendanceData = new HashMap<>();
         attendanceData.put("userId", userId);
         attendanceData.put("userName", userDisplayName);
-        attendanceData.put("date", currentDate);
-        attendanceData.put("time", currentTime);
+        attendanceData.put("date", formattedDate);
+        attendanceData.put("time", formattedTime);
         attendanceData.put("type", attendanceType);
         attendanceData.put("status", "Present");
         attendanceData.put("verificationConfidence", lastVerificationConfidence);
-        attendanceData.put("timestamp", com.google.firebase.Timestamp.now());
+        
+        // Create a proper timestamp in IST
+        com.google.firebase.Timestamp firebaseTimestamp = com.google.firebase.Timestamp.now();
+        attendanceData.put("timestamp", firebaseTimestamp);
         
         // Add to Firestore
         db.collection("face-recognition-attendance")

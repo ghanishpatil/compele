@@ -14,6 +14,9 @@ public interface ApiService {
 
     @POST("auth/register/admin")
     Call<AdminRegistrationResponse> registerAdmin(@Body AdminRegistrationRequest request);
+    
+    @POST("register/user")
+    Call<AdminRegistrationResponse> registerUser(@Header("Authorization") String token, @Body AdminRegistrationRequest request);
 
     @GET("admin/users")
     Call<UsersResponse> getUsers(@Header("Authorization") String token);

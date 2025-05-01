@@ -14,6 +14,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 
 /**
  * Repository for saving attendance data to Firestore
@@ -59,8 +60,22 @@ public class FirestoreAttendanceRepository {
             // Get current date and time
             Date now = new Date(timestamp);
             Timestamp firestoreTimestamp = new Timestamp(now);
+            
+            // Create date formatters with Indian Standard Time timezone
             SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
             SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss", Locale.US);
+            
+            // Set Indian Standard Time timezone (IST = UTC+5:30)
+            TimeZone istTimeZone = TimeZone.getTimeZone("Asia/Kolkata");
+            dateFormat.setTimeZone(istTimeZone);
+            timeFormat.setTimeZone(istTimeZone);
+            
+            // Format current date and time in IST
+            String formattedDate = dateFormat.format(now);
+            String formattedTime = timeFormat.format(now);
+            
+            Log.d(TAG, "saveAttendance: Using device time in IST: " + now.toString() + 
+                      ", Formatted as " + formattedDate + " " + formattedTime);
             
             // Create attendance data exactly matching backend structure
             Map<String, Object> attendanceData = new HashMap<>();
@@ -69,81 +84,62 @@ public class FirestoreAttendanceRepository {
             attendanceData.put("userName", userName);
             attendanceData.put("type", type);
             attendanceData.put("timestamp", firestoreTimestamp);
-            attendanceData.put("date", dateFormat.format(now));
-            attendanceData.put("time", timeFormat.format(now));
+            attendanceData.put("date", formattedDate);
+            attendanceData.put("time", formattedTime);
             attendanceData.put("status", "Present");
             attendanceData.put("verificationConfidence", verificationConfidence);
             
             Log.d(TAG, "saveAttendance: Attempting to save attendance data: " + attendanceData);
             
             // First try with a direct set
-            saveWithRetry(docId, attendanceData, callback, dateFormat.format(now), timeFormat.format(now), 0);
-            
+            db.collection(COLLECTION_PATH)
+                .document(docId)
+                .set(attendanceData)
+                .addOnSuccessListener(aVoid -> {
+                    Log.d(TAG, "saveAttendance: Successfully saved attendance to Firestore with ID: " + docId);
+                    mainHandler.post(() -> callback.onSuccess(docId));
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "saveAttendance: Failed to save attendance with direct set: " + e.getMessage());
+                    if (e instanceof FirebaseFirestoreException) {
+                        retryWithBatch(docId, attendanceData, 0, callback);
+                    } else {
+                        mainHandler.post(() -> callback.onError(e.getMessage()));
+                    }
+                });
         } catch (Exception e) {
-            String errorMsg = "Exception during attendance save preparation: " + e.getMessage();
-            Log.e(TAG, errorMsg, e);
-            callback.onError(errorMsg);
+            Log.e(TAG, "saveAttendance: Unexpected error: " + e.getMessage(), e);
+            mainHandler.post(() -> callback.onError(e.getMessage()));
         }
     }
     
-    private void saveWithRetry(String docId, Map<String, Object> attendanceData, 
-                             AttendanceCallback callback, String date, String time, int retryCount) {
-        if (retryCount >= MAX_RETRIES) {
-            String error = "Maximum retry attempts reached. All attempts to save attendance failed.";
-            Log.e(TAG, error);
-            callback.onError(error);
+    /**
+     * Retry saving attendance with batch write
+     * This is a fallback in case direct set fails due to Firestore contention
+     */
+    private void retryWithBatch(String docId, Map<String, Object> attendanceData, int attempt, AttendanceCallback callback) {
+        if (attempt >= MAX_RETRIES) {
+            Log.e(TAG, "retryWithBatch: Max retries (" + MAX_RETRIES + ") reached, giving up");
+            mainHandler.post(() -> callback.onError("Failed to save after " + MAX_RETRIES + " attempts"));
             return;
         }
-
-        Log.d(TAG, "saveWithRetry: Attempt " + (retryCount + 1) + " for document: " + docId);
         
-        db.collection(COLLECTION_PATH)
-            .document(docId)
-            .set(attendanceData)
-            .addOnSuccessListener(aVoid -> {
-                Log.d(TAG, "saveWithRetry: Successfully saved document with ID: " + docId);
-                callback.onSuccess(docId, date, time);
-            })
-            .addOnFailureListener(e -> {
-                String errorMsg = "Attempt " + (retryCount + 1) + " failed: " + e.getMessage();
-                Log.e(TAG, errorMsg, e);
-                
-                // Check specific error types
-                if (e instanceof FirebaseFirestoreException) {
-                    FirebaseFirestoreException firestoreException = (FirebaseFirestoreException) e;
-                    Log.e(TAG, "Firestore error code: " + firestoreException.getCode());
-                    
-                    // Handle specific error cases
-                    switch (firestoreException.getCode()) {
-                        case PERMISSION_DENIED:
-                            callback.onError("Permission denied. Please check authentication.");
-                            return;
-                        case UNAVAILABLE:
-                            // Retry after delay for network issues
-                            retryAfterDelay(docId, attendanceData, callback, date, time, retryCount);
-                            return;
-                        case ALREADY_EXISTS:
-                            // Generate new document ID and retry
-                            String newDocId = docId + "_retry_" + System.currentTimeMillis();
-                            Log.d(TAG, "Document already exists, retrying with new ID: " + newDocId);
-                            saveWithRetry(newDocId, attendanceData, callback, date, time, retryCount);
-                            return;
-                        default:
-                            // For other errors, try regular retry
-                            retryAfterDelay(docId, attendanceData, callback, date, time, retryCount);
-                    }
-                } else {
-                    // For non-Firestore exceptions, try regular retry
-                    retryAfterDelay(docId, attendanceData, callback, date, time, retryCount);
-                }
-            });
-    }
-    
-    private void retryAfterDelay(String docId, Map<String, Object> attendanceData,
-                                AttendanceCallback callback, String date, String time, int retryCount) {
+        // Add delay before retrying
         mainHandler.postDelayed(() -> {
-            Log.d(TAG, "retryAfterDelay: Retrying after delay, attempt " + (retryCount + 2));
-            saveWithRetry(docId, attendanceData, callback, date, time, retryCount + 1);
+            Log.d(TAG, "retryWithBatch: Retry #" + (attempt + 1) + " for document " + docId);
+            
+            // Try with batch write
+            db.collection(COLLECTION_PATH)
+                .document(docId)
+                .set(attendanceData, SetOptions.merge())
+                .addOnSuccessListener(aVoid -> {
+                    Log.d(TAG, "retryWithBatch: Successfully saved attendance with batch on attempt #" + (attempt + 1));
+                    mainHandler.post(() -> callback.onSuccess(docId));
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "retryWithBatch: Failed on attempt #" + (attempt + 1) + ": " + e.getMessage());
+                    retryWithBatch(docId, attendanceData, attempt + 1, callback);
+                });
         }, RETRY_DELAY_MS);
     }
     
@@ -188,10 +184,10 @@ public class FirestoreAttendanceRepository {
     }
     
     /**
-     * Callback interface for attendance operations
+     * Callback interface for async operations
      */
     public interface AttendanceCallback {
-        void onSuccess(String documentId, String date, String time);
+        void onSuccess(String docId);
         void onError(String errorMessage);
     }
 } 

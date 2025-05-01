@@ -18,6 +18,16 @@ public class AttendanceResponse {
     @SerializedName("time")
     private String time;
     
+    @SerializedName("success")
+    private boolean success = true; // Default to true for backward compatibility
+    
+    // Helper method to check if response indicates an error
+    public boolean isError() {
+        return !success || 
+               (message != null && message.toLowerCase().contains("error")) ||
+               (message != null && message.toLowerCase().contains("incomplete"));
+    }
+    
     public String getMessage() {
         return message;
     }
@@ -48,5 +58,24 @@ public class AttendanceResponse {
     
     public void setTime(String time) {
         this.time = time;
+    }
+    
+    public boolean isSuccess() {
+        return success;
+    }
+    
+    public void setSuccess(boolean success) {
+        this.success = success;
+    }
+    
+    @Override
+    public String toString() {
+        return "AttendanceResponse{" +
+                "message='" + message + '\'' +
+                ", attendanceId='" + attendanceId + '\'' +
+                ", date='" + date + '\'' +
+                ", time='" + time + '\'' +
+                ", success=" + success +
+                '}';
     }
 } 

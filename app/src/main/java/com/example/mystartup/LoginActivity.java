@@ -185,6 +185,14 @@ public class LoginActivity extends AppCompatActivity {
                     Log.d("LoginActivity", "Received token: " + 
                         (loginResponse.getToken() != null ? "Valid token" : "Null token"));
                     
+                    if (loginResponse.getToken() == null) {
+                        Log.e("LoginActivity", "Server returned success but with a null token!");
+                        Toast.makeText(LoginActivity.this, 
+                            "Authentication error: Server returned a null token", 
+                            Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    
                     // Sign in with Firebase using the custom token
                     mAuth.signInWithCustomToken(loginResponse.getToken())
                         .addOnCompleteListener(task -> {
@@ -197,7 +205,8 @@ public class LoginActivity extends AppCompatActivity {
                                 Log.e("LoginActivity", "Firebase auth failed: " + 
                                     (task.getException() != null ? task.getException().getMessage() : "Unknown error"));
                                 Toast.makeText(LoginActivity.this, 
-                                    "Authentication failed: " + task.getException().getMessage(), 
+                                    "Authentication failed: " + 
+                                    (task.getException() != null ? task.getException().getMessage() : "Unknown error"), 
                                     Toast.LENGTH_LONG).show();
                             }
                         });
@@ -242,6 +251,8 @@ public class LoginActivity extends AppCompatActivity {
             .putString(KEY_PASSWORD, password)
             .putString(KEY_SEVARTH_ID, sevarthId)
             .apply();
+            
+        Log.d("LoginActivity", "Auth token and user data saved to preferences");
     }
 
     private void navigateToMain() {
