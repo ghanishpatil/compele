@@ -24,7 +24,9 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -112,9 +114,32 @@ public class RegularUsersFragment extends Fragment implements UserAdapter.OnUser
             .addOnSuccessListener(queryDocumentSnapshots -> {
                 userList.clear();
                 
+                // Set to track unique sevarthIds to avoid duplicates
+                Set<String> processedSevarthIds = new HashSet<>();
+                
                 for (QueryDocumentSnapshot document : queryDocumentSnapshots) {
-                    User user = document.toObject(User.class);
-                    userList.add(user);
+                    try {
+                        User user = document.toObject(User.class);
+                        
+                        // Skip this user if we've already processed a user with this sevarthId
+                        if (user.getSevarthId() != null && !user.getSevarthId().isEmpty()) {
+                            if (processedSevarthIds.contains(user.getSevarthId())) {
+                                // This is a duplicate user, skip it
+                                continue;
+                            }
+                            
+                            // Add this sevarthId to our processed set
+                            processedSevarthIds.add(user.getSevarthId());
+                        }
+                        
+                        // Add the user to our list
+                        userList.add(user);
+                    } catch (Exception e) {
+                        // Log error but continue processing other users
+                        if (getContext() != null) {
+                            Toast.makeText(getContext(), "Error processing a user", Toast.LENGTH_SHORT).show();
+                        }
+                    }
                 }
                 
                 adapter.notifyDataSetChanged();

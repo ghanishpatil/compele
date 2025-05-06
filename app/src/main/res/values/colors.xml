@@ -18,6 +18,7 @@
     <color name="blue_secondary">#2A6FBF</color>
     <color name="green_success">#4CAF50</color>
     <color name="colorPrimary">#1A4B8C</color>
+    <color name="gray_medium">#9E9E9E</color>
     
     <!-- Table row colors -->
     <color name="tableRowEven">#FFFFFF</color>

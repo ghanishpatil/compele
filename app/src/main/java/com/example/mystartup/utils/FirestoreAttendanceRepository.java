@@ -40,10 +40,13 @@ public class FirestoreAttendanceRepository {
      * @param userName The user's display name
      * @param type The attendance type ("check_in" or "check_out")
      * @param verificationConfidence The verification confidence
+     * @param locationId The office location ID
+     * @param officeName The office location name
      * @param callback Callback for result
      */
     public void saveAttendance(String sevarthId, String userId, String userName, String type, 
-                             double verificationConfidence, AttendanceCallback callback) {
+                             double verificationConfidence, String locationId, String officeName,
+                             AttendanceCallback callback) {
         if (sevarthId == null || sevarthId.isEmpty()) {
             String error = "saveAttendance: sevarthId is null or empty";
             Log.e(TAG, error);
@@ -88,6 +91,8 @@ public class FirestoreAttendanceRepository {
             attendanceData.put("time", formattedTime);
             attendanceData.put("status", "Present");
             attendanceData.put("verificationConfidence", verificationConfidence);
+            attendanceData.put("locationId", locationId);
+            attendanceData.put("officeName", officeName);
             
             Log.d(TAG, "saveAttendance: Attempting to save attendance data: " + attendanceData);
             
@@ -111,6 +116,16 @@ public class FirestoreAttendanceRepository {
             Log.e(TAG, "saveAttendance: Unexpected error: " + e.getMessage(), e);
             mainHandler.post(() -> callback.onError(e.getMessage()));
         }
+    }
+    
+    /**
+     * Save attendance record to Firestore (legacy method for compatibility)
+     */
+    public void saveAttendance(String sevarthId, String userId, String userName, String type, 
+                             double verificationConfidence, AttendanceCallback callback) {
+        // Call the complete method with default values for location
+        saveAttendance(sevarthId, userId, userName, type, verificationConfidence, 
+                      "unknown", "Unknown Office", callback);
     }
     
     /**

@@ -29,7 +29,9 @@ import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -103,9 +105,13 @@ public class UsersFragment extends Fragment implements UserAdapter.OnUserClickLi
             .addOnSuccessListener(queryDocumentSnapshots -> {
                 userList.clear();
                 
+                // Set to track unique sevarthIds to avoid duplicates
+                Set<String> processedSevarthIds = new HashSet<>();
+                
                 for (QueryDocumentSnapshot document : queryDocumentSnapshots) {
                     try {
                         User user = document.toObject(User.class);
+                        
                         // Handle legacy data format
                         if (user.getLocationIds() == null) {
                             user.setLocationIds(new ArrayList<>());
@@ -113,6 +119,20 @@ public class UsersFragment extends Fragment implements UserAdapter.OnUserClickLi
                         if (user.getLocationNames() == null) {
                             user.setLocationNames(new ArrayList<>());
                         }
+                        
+                        // Skip this user if we've already processed a user with this sevarthId
+                        if (user.getSevarthId() != null && !user.getSevarthId().isEmpty()) {
+                            if (processedSevarthIds.contains(user.getSevarthId())) {
+                                // This is a duplicate user, skip it
+                                Log.d(TAG, "Skipping duplicate user with sevarthId: " + user.getSevarthId());
+                                continue;
+                            }
+                            
+                            // Add this sevarthId to our processed set
+                            processedSevarthIds.add(user.getSevarthId());
+                        }
+                        
+                        // Add the user to our list
                         userList.add(user);
                     } catch (Exception e) {
                         Log.e(TAG, "Error converting document to User: " + document.getId(), e);

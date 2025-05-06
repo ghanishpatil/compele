@@ -238,13 +238,30 @@ public class LocationSelectionActivity extends AppCompatActivity implements Loca
     public void onLocationSelected(OfficeLocation location) {
         // Save the selected location ID, name, and coordinates
         SharedPreferences prefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        prefs.edit()
-            .putString(KEY_SELECTED_LOCATION_ID, location.getId())
-            .putString(KEY_SELECTED_LOCATION_NAME, location.getName())
-            .putFloat("selected_location_latitude", location.getLatitude().floatValue())
-            .putFloat("selected_location_longitude", location.getLongitude().floatValue())
-            .putInt("selected_location_radius", location.getRadius() != null ? location.getRadius() : 100)
-            .apply();
+        SharedPreferences.Editor editor = prefs.edit();
+        
+        // Add null checks before accessing location data
+        String locationId = location.getId() != null ? location.getId() : "";
+        String locationName = location.getName() != null ? location.getName() : "";
+        
+        editor.putString(KEY_SELECTED_LOCATION_ID, locationId);
+        editor.putString(KEY_SELECTED_LOCATION_NAME, locationName);
+        
+        // Prevent NullPointerException when accessing latitude/longitude
+        if (location.getLatitude() != null) {
+            editor.putFloat("selected_location_latitude", location.getLatitude().floatValue());
+        } else {
+            editor.putFloat("selected_location_latitude", 0f);
+        }
+        
+        if (location.getLongitude() != null) {
+            editor.putFloat("selected_location_longitude", location.getLongitude().floatValue());
+        } else {
+            editor.putFloat("selected_location_longitude", 0f);
+        }
+        
+        editor.putInt("selected_location_radius", location.getRadius() != null ? location.getRadius() : 100);
+        editor.apply();
 
         // Navigate to the UserAttendanceActivity
         Intent intent = new Intent(this, UserAttendanceActivity.class);

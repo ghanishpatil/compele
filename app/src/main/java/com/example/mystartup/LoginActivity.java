@@ -11,6 +11,7 @@ import android.text.TextWatcher;
 import android.view.View;
 import android.widget.Toast;
 import android.util.Log;
+import android.app.AlertDialog;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -33,6 +34,7 @@ import retrofit2.converter.gson.GsonConverterFactory;
 import org.json.JSONObject;
 
 import java.net.UnknownHostException;
+import java.util.Map;
 
 public class LoginActivity extends AppCompatActivity {
     private ActivityLoginBinding binding;
@@ -91,9 +93,10 @@ public class LoginActivity extends AppCompatActivity {
 
     private void setupClickListeners() {
         binding.loginButton.setOnClickListener(v -> attemptLogin());
-        binding.forgotPasswordTextView.setOnClickListener(v -> 
-            Toast.makeText(this, "Forgot password functionality coming soon!", Toast.LENGTH_SHORT).show()
-        );
+        binding.forgotPasswordTextView.setOnClickListener(v -> {
+            Intent intent = new Intent(LoginActivity.this, ForgotPasswordActivity.class);
+            startActivity(intent);
+        });
     }
 
     private void setupTextWatchers() {
@@ -159,88 +162,280 @@ public class LoginActivity extends AppCompatActivity {
             Toast.makeText(this, "Please enter your password", Toast.LENGTH_SHORT).show();
             return;
         }
+        
+        // Format email for Firebase Authentication
+        String email = sevarthId + "@example.com";
 
         binding.loginButton.setEnabled(false);
         
-        // Add debug toast to show what URL we're connecting to
-        Toast.makeText(this, "Connecting to: " + RetrofitClient.getInstance().getBaseUrl(), 
-            Toast.LENGTH_LONG).show();
-        Log.d("LoginActivity", "Attempting login with backend at: " + 
-            RetrofitClient.getInstance().getBaseUrl());
+        // Show progress dialog
+        AlertDialog progressDialog = new AlertDialog.Builder(this)
+            .setMessage("Logging in...")
+            .setCancelable(false)
+            .create();
+        progressDialog.show();
         
-        LoginRequest request = new LoginRequest(sevarthId, password, role);
-        apiService.login(request).enqueue(new Callback<LoginResponse>() {
-            @Override
-            public void onResponse(Call<LoginResponse> call, Response<LoginResponse> response) {
+        // Instead of trying backend API first, verify credentials in Firestore or local prefs
+        tryDirectFirebaseAuth(email, password, role, sevarthId, progressDialog, false);
+    }
+    
+    private void tryDirectFirebaseAuth(String email, String password, String role, String sevarthId, 
+                                        AlertDialog progressDialog, boolean showPasswordError) {
+        // Don't try Firebase Auth if we already determined the password is wrong
+        if (showPasswordError) {
+            progressDialog.dismiss();
+            Toast.makeText(LoginActivity.this, 
+                "Invalid password. Please try again or reset your password.", 
+                Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        binding.loginButton.setEnabled(false);
+        Log.d("LoginActivity", "Checking credentials for sevarth ID: " + sevarthId);
+        
+        // Check if we have a password override for this user
+        SharedPreferences passwordOverrides = getSharedPreferences("PasswordOverrides", Context.MODE_PRIVATE);
+        
+        // Check by sevarthId first
+        String overridePassword = passwordOverrides.getString(sevarthId, null);
+        
+        if (overridePassword != null) {
+            // We have a saved password - check if the entered password matches
+            if (overridePassword.equals(password)) {
+                // Correct password provided
+                Log.d("LoginActivity", "Password matched override from local storage by sevarthId");
+                
+                // Fetch user data from Firestore to ensure we have all needed info
+                fetchUserDataAndLogin(sevarthId, role, "local_override", progressDialog);
+            } else {
+                // Incorrect password
+                progressDialog.dismiss();
                 binding.loginButton.setEnabled(true);
-                
-                // Add more detailed logging
-                Log.d("LoginActivity", "Login response received. Success: " + response.isSuccessful() 
-                    + ", Code: " + response.code());
-                
-                if (response.isSuccessful() && response.body() != null) {
-                    LoginResponse loginResponse = response.body();
+                Log.d("LoginActivity", "Password did NOT match override from local storage");
+                Toast.makeText(LoginActivity.this, "Invalid password. Please try again.", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        
+        // Now we'll check if there's a phone number saved in the SharedPreferences
+        // Loop through all keys to find phone number formats
+        boolean phoneNumberFound = false;
+        String matchedPhoneNumber = null;
+        String savedPhonePassword = null;
+        
+        Map<String, ?> allPrefs = passwordOverrides.getAll();
+        for (Map.Entry<String, ?> entry : allPrefs.entrySet()) {
+            String key = entry.getKey();
+            // Check if key looks like a phone number (starts with + and has digits)
+            if (key.startsWith("+") && key.matches("\\+[0-9]+")) {
+                phoneNumberFound = true;
+                matchedPhoneNumber = key;
+                savedPhonePassword = (String) entry.getValue();
+                if (savedPhonePassword != null && savedPhonePassword.equals(password)) {
+                    // We found a match by phone number with correct password
+                    Log.d("LoginActivity", "Password matched override from local storage by phone number: " + key);
                     
-                    // Log token details
-                    Log.d("LoginActivity", "Received token: " + 
-                        (loginResponse.getToken() != null ? "Valid token" : "Null token"));
+                    // Create a final copy for the lambda to use
+                    final String phoneNumber = matchedPhoneNumber;
                     
-                    if (loginResponse.getToken() == null) {
-                        Log.e("LoginActivity", "Server returned success but with a null token!");
-                        Toast.makeText(LoginActivity.this, 
-                            "Authentication error: Server returned a null token", 
-                            Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    
-                    // Sign in with Firebase using the custom token
-                    mAuth.signInWithCustomToken(loginResponse.getToken())
-                        .addOnCompleteListener(task -> {
-                            if (task.isSuccessful()) {
-                                Log.d("LoginActivity", "Firebase auth successful");
-                                saveAuthToken(loginResponse.getToken(), role);
+                    // Search for user with this phone number in Firestore
+                    db.collection("users")
+                        .whereEqualTo("phoneNumber", phoneNumber)
+                        .limit(1)
+                        .get()
+                        .addOnSuccessListener(querySnapshot -> {
+                            if (!querySnapshot.isEmpty()) {
+                                // Found user with this phone number
+                                String userId = querySnapshot.getDocuments().get(0).getId();
+                                fetchUserDataAndLogin(userId, role, "phone_override", progressDialog);
+                            } else {
+                                // No user found with this phone number in Firestore
+                                // Create a generic login with just the phone info
+                        progressDialog.dismiss();
+                                binding.loginButton.setEnabled(true);
+                                
+                                // Create a placeholder token
+                                String placeholderToken = "phone_override_" + System.currentTimeMillis();
+                                
+                                // Save auth details - use the phone number as sevarthId as fallback
+                                saveAuthToken(placeholderToken, role, phoneNumber);
+                                
                                 Toast.makeText(LoginActivity.this, "Login successful!", Toast.LENGTH_SHORT).show();
                                 navigateToMain();
-                            } else {
-                                Log.e("LoginActivity", "Firebase auth failed: " + 
-                                    (task.getException() != null ? task.getException().getMessage() : "Unknown error"));
-                                Toast.makeText(LoginActivity.this, 
-                                    "Authentication failed: " + 
-                                    (task.getException() != null ? task.getException().getMessage() : "Unknown error"), 
-                                    Toast.LENGTH_LONG).show();
                             }
+                        })
+                        .addOnFailureListener(e -> {
+                            // Failed to query Firestore for phone number
+                            Log.e("LoginActivity", "Failed to query user by phone: " + e.getMessage());
+                            // Still allow login with just the phone info
+                            progressDialog.dismiss();
+                            binding.loginButton.setEnabled(true);
+                            
+                            // Create a placeholder token
+                            String placeholderToken = "phone_override_" + System.currentTimeMillis();
+                            
+                            // Save auth details
+                            saveAuthToken(placeholderToken, role, phoneNumber);
+                            
+                            Toast.makeText(LoginActivity.this, "Login successful!", Toast.LENGTH_SHORT).show();
+                            navigateToMain();
                         });
-                } else {
-                    handleApiError(response);
+                    return;
                 }
             }
-
-            @Override
-            public void onFailure(Call<LoginResponse> call, Throwable t) {
+        }
+        
+        // If we found a phone number but password didn't match, show invalid password
+        if (phoneNumberFound) {
+            progressDialog.dismiss();
+            binding.loginButton.setEnabled(true);
+            Log.d("LoginActivity", "Found phone number but password did not match");
+            Toast.makeText(LoginActivity.this, "Invalid password. Please try again.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        
+        // If we get here, we didn't find a match in local overrides, continue with Firestore check
+        // First check if the user exists in Firestore and validate password
+        db.collection("users")
+            .document(sevarthId)
+            .get()
+            .addOnSuccessListener(documentSnapshot -> {
+                if (documentSnapshot.exists()) {
+                    String storedPassword = documentSnapshot.getString("password");
+                    boolean isPasswordCorrect = storedPassword != null && storedPassword.equals(password);
+                    
+                    if (isPasswordCorrect) {
+                        // Password matches in Firestore, allow login
+                        Log.d("LoginActivity", "Password verified in Firestore, login successful");
+                        fetchUserDataAndLogin(sevarthId, role, "firestore_verified", progressDialog);
+                    } else {
+                        // Password doesn't match Firestore record
+                        progressDialog.dismiss();
+                        binding.loginButton.setEnabled(true);
+                        Log.e("LoginActivity", "Password mismatch with Firestore record");
+                        Toast.makeText(LoginActivity.this, "Invalid password. Please try again.", Toast.LENGTH_LONG).show();
+                    }
+                } else {
+                    // As a last resort, try Firebase Auth
+                    // User doesn't exist in Firestore by sevarthId or local prefs
+                    mAuth.signInWithEmailAndPassword(email, password)
+                        .addOnSuccessListener(authResult -> {
+                            progressDialog.dismiss();
+                            binding.loginButton.setEnabled(true);
+                            
+                            Log.d("LoginActivity", "Firebase Auth successful");
+                            
+                            // Create a placeholder token
+                            String placeholderToken = "firebase_auth_" + System.currentTimeMillis();
+                            
+                            // Save auth details
+                            saveAuthToken(placeholderToken, role);
+                            
+                            Toast.makeText(LoginActivity.this, "Login successful via Firebase authentication!", Toast.LENGTH_SHORT).show();
+                            navigateToMain();
+                        })
+                        .addOnFailureListener(e -> {
+                            progressDialog.dismiss();
+                            binding.loginButton.setEnabled(true);
+                            
+                            Log.e("LoginActivity", "Authentication failed: " + e.getMessage(), e);
+                            
+                            // Generic login failure
+                            Toast.makeText(LoginActivity.this, 
+                                "Login failed: Invalid username or password", 
+                                Toast.LENGTH_LONG).show();
+                        });
+                }
+            })
+            .addOnFailureListener(e -> {
+                // Error querying Firestore
+                Log.e("LoginActivity", "Error querying Firestore: " + e.getMessage());
+                progressDialog.dismiss();
                 binding.loginButton.setEnabled(true);
-                String errorMessage = t instanceof UnknownHostException ? 
-                    "Cannot connect to server. Please check your internet connection." :
-                    "Network error: " + t.getMessage();
-                Log.e("LoginActivity", "Login request failed: " + t.getMessage(), t);
-                Toast.makeText(LoginActivity.this, errorMessage, Toast.LENGTH_LONG).show();
-            }
-        });
+                Toast.makeText(LoginActivity.this, "Login failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            });
     }
 
-    private boolean isNetworkAvailable() {
-        ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (connectivityManager != null) {
-            NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.getActiveNetwork());
-            return capabilities != null && (
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
+    /**
+     * Fetch user data from Firestore and proceed with login
+     */
+    private void fetchUserDataAndLogin(String userId, String role, String authMethod, AlertDialog progressDialog) {
+        db.collection("users")
+            .document(userId)
+            .get()
+            .addOnSuccessListener(documentSnapshot -> {
+                progressDialog.dismiss();
+                binding.loginButton.setEnabled(true);
+                
+                // Create a placeholder token
+                String placeholderToken = authMethod + "_" + System.currentTimeMillis();
+                
+                if (documentSnapshot.exists()) {
+                    // We found the user, save their data for app use
+                    String userName = documentSnapshot.getString("name");
+                    String userEmail = documentSnapshot.getString("email");
+                    String userPhone = documentSnapshot.getString("phoneNumber");
+                    
+                    // Save auth details with user data included
+                    saveUserDataAndToken(placeholderToken, role, userId, userName, userEmail, userPhone);
+                    
+                    Log.d("LoginActivity", "User data loaded successfully for: " + userId);
+                } else {
+                    // User document doesn't exist, use available data
+                saveAuthToken(placeholderToken, role);
+                    Log.d("LoginActivity", "No user document found for: " + userId);
+                }
+                
+                Toast.makeText(LoginActivity.this, "Login successful!", Toast.LENGTH_SHORT).show();
+                navigateToMain();
+            })
+            .addOnFailureListener(e -> {
+                progressDialog.dismiss();
+                binding.loginButton.setEnabled(true);
+                
+                Log.e("LoginActivity", "Failed to fetch user data: " + e.getMessage(), e);
+                
+                // Still allow login with minimal data
+                String placeholderToken = authMethod + "_" + System.currentTimeMillis();
+                saveAuthToken(placeholderToken, role);
+                
+                Toast.makeText(LoginActivity.this, "Login successful!", Toast.LENGTH_SHORT).show();
+                navigateToMain();
+            });
+    }
+    
+    private void saveUserDataAndToken(String token, String role, String userId, String name, String email, String phone) {
+        String sevarthId = binding.sevarthIdEditText.getText().toString().trim();
+        String password = binding.passwordEditText.getText().toString().trim();
+        
+        // Use email from user data if available, otherwise construct one
+        if (email == null || email.isEmpty()) {
+            email = sevarthId + "@example.com";
         }
-        return false;
+        
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(KEY_AUTH_TOKEN, token);
+        editor.putString(KEY_USER_ROLE, role);
+        editor.putString(KEY_EMAIL, email);
+        editor.putString(KEY_PASSWORD, password);
+        editor.putString(KEY_SEVARTH_ID, sevarthId);
+        
+        // Store additional user data
+        editor.putString("user_id", userId);
+        editor.putString("user_name", name != null ? name : "");
+        editor.putString("user_phone", phone != null ? phone : "");
+        
+        editor.apply();
+        
+        Log.d("LoginActivity", "User data and auth token saved to preferences");
     }
 
     private void saveAuthToken(String token, String role) {
         String sevarthId = binding.sevarthIdEditText.getText().toString().trim();
+        saveAuthToken(token, role, sevarthId);
+    }
+    
+    private void saveAuthToken(String token, String role, String sevarthId) {
         String email = sevarthId + "@example.com";
         String password = binding.passwordEditText.getText().toString().trim();
         
@@ -253,6 +448,18 @@ public class LoginActivity extends AppCompatActivity {
             .apply();
             
         Log.d("LoginActivity", "Auth token and user data saved to preferences");
+    }
+
+    private boolean isNetworkAvailable() {
+        ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivityManager != null) {
+            NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.getActiveNetwork());
+            return capabilities != null && (
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
+        }
+        return false;
     }
 
     private void navigateToMain() {

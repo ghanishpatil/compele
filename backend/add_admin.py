@@ -26,25 +26,38 @@ except Exception as e:
     sys.exit(1)
 
 # Admin details from the table
-admin_data = {
-    "id": str(uuid.uuid4()),
-    "sevarthId": "REVDKKM7301",
-    "firstName": "Devrao",
-    "lastName": "Kargude",
-    "organizationName": "Tahsil OFFICE Sengaon",
-    "phoneNumber": "9689553304",
-    "email": "devraokargude@gmail.com",
-    "role": "admin",
-    "active": True,
-    "createdAt": int(time.time() * 1000),
-    "updatedAt": int(time.time() * 1000)
-}
+admins_list = [
+    {
+        "sevarthId": "REVDKGM7003",
+        "firstName": "Dilip",
+        "lastName": "Gayakwad",
+        "organizationName": "Tahsil OFFICE Sengaon",
+        "phoneNumber": "9850916726",
+        "email": "dilipkg024@gmail.com",
+    },
+    {
+        "sevarthId": "REVAHSM7001",
+        "firstName": "Anil",
+        "lastName": "Sarode",
+        "organizationName": "Tahsil OFFICE Sengaon",
+        "phoneNumber": "8856826524",
+        "email": "anilsarode358@gmail.com",
+    },
+    {
+        "sevarthId": "REVDKKM7301",
+        "firstName": "Devrao",
+        "lastName": "kargude",
+        "organizationName": "Tahsil OFFICE Sengaon",
+        "phoneNumber": "9689553304",
+        "email": "devraokargude@gmail.com",
+    }
+]
 
 # Default password for the admin
 default_password = "Admin@123"
 
 # Function to create the admin user in Firebase Authentication
-def create_admin_auth_user():
+def create_admin_auth_user(admin_data):
     try:
         # Check if user already exists
         try:
@@ -71,8 +84,15 @@ def create_admin_auth_user():
         return None
 
 # Function to add admin to Firestore
-def add_admin_to_firestore(auth_uid=None):
+def add_admin_to_firestore(admin_data, auth_uid=None):
     try:
+        # Add common fields
+        admin_data["id"] = str(uuid.uuid4())
+        admin_data["role"] = "admin"
+        admin_data["active"] = True
+        admin_data["createdAt"] = int(time.time() * 1000)
+        admin_data["updatedAt"] = int(time.time() * 1000)
+        
         # If we have an auth UID, add it to the admin data
         if auth_uid:
             admin_data["authUid"] = auth_uid
@@ -92,16 +112,17 @@ def add_admin_to_firestore(auth_uid=None):
 
 # Main execution
 if __name__ == "__main__":
-    print("Adding admin to Firebase...")
-    uid = create_admin_auth_user()
-    if uid:
-        success = add_admin_to_firestore(uid)
-        if success:
-            print("\nAdmin added successfully!")
-            print(f"Email: {admin_data['email']}")
-            print(f"Default Password: {default_password}")
-            print("\nNOTE: Please change the password after first login.")
+    for admin_data in admins_list:
+        print(f"\nAdding admin {admin_data['firstName']} {admin_data['lastName']} to Firebase...")
+        uid = create_admin_auth_user(admin_data)
+        if uid:
+            success = add_admin_to_firestore(admin_data, uid)
+            if success:
+                print(f"Admin {admin_data['firstName']} {admin_data['lastName']} added successfully!")
+                print(f"Email: {admin_data['email']}")
+                print(f"Default Password: {default_password}")
+                print("NOTE: Please change the password after first login.")
+            else:
+                print(f"Failed to add admin {admin_data['firstName']} {admin_data['lastName']} to Firestore.")
         else:
-            print("Failed to add admin to Firestore.")
-    else:
-        print("Failed to create admin authentication user.") 
+            print(f"Failed to create admin authentication user for {admin_data['firstName']} {admin_data['lastName']}.") 

@@ -19,6 +19,7 @@ public class AttendanceRecord {
     private String sevarthId;
     private String locationId;
     private String officeName;
+    private String locationName; // Some devices might use this instead of officeName
     private double latitude;
     private double longitude;
 
@@ -47,7 +48,7 @@ public class AttendanceRecord {
 
     // Getters and setters
     public String getId() {
-        return id;
+        return id != null ? id : "";
     }
 
     public void setId(String id) {
@@ -55,7 +56,7 @@ public class AttendanceRecord {
     }
 
     public String getDate() {
-        return date;
+        return date != null ? date : "";
     }
 
     public void setDate(String date) {
@@ -63,7 +64,7 @@ public class AttendanceRecord {
     }
 
     public String getStatus() {
-        return status;
+        return status != null ? status : "Unknown";
     }
 
     public void setStatus(String status) {
@@ -71,7 +72,7 @@ public class AttendanceRecord {
     }
 
     public String getTime() {
-        return time;
+        return time != null ? time : "";
     }
 
     public void setTime(String time) {
@@ -87,7 +88,7 @@ public class AttendanceRecord {
     }
 
     public String getType() {
-        return type;
+        return type != null ? type : "unknown";
     }
 
     public void setType(String type) {
@@ -95,7 +96,7 @@ public class AttendanceRecord {
     }
 
     public String getUserId() {
-        return userId;
+        return userId != null ? userId : "";
     }
 
     public void setUserId(String userId) {
@@ -103,7 +104,7 @@ public class AttendanceRecord {
     }
 
     public String getUserName() {
-        return userName;
+        return userName != null ? userName : "Unknown User";
     }
 
     public void setUserName(String userName) {
@@ -119,7 +120,7 @@ public class AttendanceRecord {
     }
 
     public String getSevarthId() {
-        return sevarthId;
+        return sevarthId != null ? sevarthId : "";
     }
 
     public void setSevarthId(String sevarthId) {
@@ -127,7 +128,7 @@ public class AttendanceRecord {
     }
 
     public String getLocationId() {
-        return locationId;
+        return locationId != null ? locationId : "";
     }
 
     public void setLocationId(String locationId) {
@@ -135,11 +136,23 @@ public class AttendanceRecord {
     }
 
     public String getOfficeName() {
+        // If officeName is null/empty, try locationName as alternative
+        if (officeName == null || officeName.isEmpty()) {
+            return locationName != null ? locationName : "Unknown Office";
+        }
         return officeName;
     }
 
     public void setOfficeName(String officeName) {
         this.officeName = officeName;
+    }
+    
+    public String getLocationName() {
+        return locationName;
+    }
+    
+    public void setLocationName(String locationName) {
+        this.locationName = locationName;
     }
 
     public double getLatitude() {
@@ -163,10 +176,10 @@ public class AttendanceRecord {
     }
 
     public boolean isCheckIn() {
-        return "check_in".equals(type);
+        return type != null && "check_in".equals(type);
     }
 
     public boolean isCheckOut() {
-        return "check_out".equals(type);
+        return type != null && "check_out".equals(type);
     }
 } 

@@ -79,9 +79,27 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
         return filteredRecords.size();
     }
     
+    /**
+     * Update Records in the adapter with better error handling
+     */
     public void setRecords(List<AttendanceRecord> newRecords) {
+        if (newRecords == null) {
+            allRecords.clear();
+            filteredRecords.clear();
+            notifyDataSetChanged();
+            return;
+        }
+        
+        // Filter out null records
+        List<AttendanceRecord> validRecords = new ArrayList<>();
+        for (AttendanceRecord record : newRecords) {
+            if (record != null) {
+                validRecords.add(record);
+            }
+        }
+        
         allRecords.clear();
-        allRecords.addAll(newRecords);
+        allRecords.addAll(validRecords);
         
         // By default, show all records
         filteredRecords = new ArrayList<>(allRecords);
@@ -91,6 +109,9 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
         lastPosition = -1;
     }
     
+    /**
+     * Safely filter records by type
+     */
     public void filterByType(String type) {
         filteredRecords = new ArrayList<>();
         
@@ -100,7 +121,7 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
         } else {
             // Filter by type
             for (AttendanceRecord record : allRecords) {
-                if (type.equalsIgnoreCase(record.getType())) {
+                if (record != null && record.getType() != null && type.equalsIgnoreCase(record.getType())) {
                     filteredRecords.add(record);
                 }
             }
@@ -134,10 +155,21 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
         }
         
         public void bind(AttendanceRecord record) {
-            // Set date
-            dateText.setText(record.getDate());
+            // Set date with fallback
+            String dateStr = record.getDate();
+            if (dateStr != null && !dateStr.isEmpty()) {
+                dateText.setText(dateStr);
+            } else {
+                // Try to format from timestamp if date string is missing
+                Date date = record.getDateObject();
+                if (date != null) {
+                    dateText.setText(DATE_FORMAT.format(date));
+                } else {
+                    dateText.setText("Unknown date");
+                }
+            }
             
-            // Format and set time in IST
+            // Format and set time in IST with fallback
             String timeString = record.getTime();
             try {
                 if (timeString != null && !timeString.isEmpty()) {
@@ -151,22 +183,34 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
                         timeText.setText(timeString);
                     }
                 } else {
-                    timeText.setText("--:--");
+                    // If no time string, try to get from timestamp
+                    Date date = record.getDateObject();
+                    if (date != null) {
+                        timeText.setText(TIME_DISPLAY_FORMAT.format(date));
+                    } else {
+                        timeText.setText("--:--");
+                    }
                 }
             } catch (ParseException e) {
                 // If parsing fails, use the original time string
-                timeText.setText(timeString);
+                timeText.setText(timeString != null ? timeString : "--:--");
             }
             
-            // Set office name
+            // Set office name with fallback
             String officeName = record.getOfficeName();
             if (officeName != null && !officeName.isEmpty()) {
                 officeNameText.setText(officeName);
             } else {
-                officeNameText.setText("Unknown Office");
+                // Check if we have location ID as fallback
+                String locationId = record.getLocationId();
+                if (locationId != null && !locationId.isEmpty()) {
+                    officeNameText.setText("Office ID: " + locationId);
+                } else {
+                    officeNameText.setText("Unknown Office");
+                }
             }
             
-            // Set type indicator (check in/out)
+            // Set type indicator (check in/out) with fallback
             String recordType = record.getType();
             if (recordType != null) {
                 if (recordType.equalsIgnoreCase("check_in")) {
@@ -177,7 +221,17 @@ public class AttendanceAdapter extends RecyclerView.Adapter<AttendanceAdapter.At
                     typeIndicator.setText("CHECK OUT");
                     typeIndicator.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.navy_medium));
                     statusIndicator.setBackgroundColor(ContextCompat.getColor(context, R.color.navy_medium));
+                } else {
+                    // Unknown type
+                    typeIndicator.setText(recordType.toUpperCase());
+                    typeIndicator.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.gray_medium));
+                    statusIndicator.setBackgroundColor(ContextCompat.getColor(context, R.color.gray_medium));
                 }
+            } else {
+                // No type specified
+                typeIndicator.setText("UNKNOWN");
+                typeIndicator.setBackgroundTintList(ContextCompat.getColorStateList(context, R.color.gray_medium));
+                statusIndicator.setBackgroundColor(ContextCompat.getColor(context, R.color.gray_medium));
             }
         }
     }

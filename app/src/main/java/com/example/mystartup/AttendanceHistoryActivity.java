@@ -2,6 +2,7 @@ package com.example.mystartup;
 
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Rect;
 import android.os.Bundle;
@@ -38,6 +39,10 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.ViewPropertyAnimatorListener;
 import androidx.core.view.animation.PathInterpolatorCompat;
 import android.view.animation.Animation;
+import android.view.ViewGroup;
+import java.text.SimpleDateFormat;
+import java.util.Locale;
+import java.util.TimeZone;
 
 public class AttendanceHistoryActivity extends AppCompatActivity {
     private static final String TAG = "AttendanceHistory";
@@ -183,43 +188,79 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
             return;
         }
         
-        String currentUserId = currentUser.getUid();
-        Log.d(TAG, "Loading attendance records for user ID: " + currentUserId);
+        final String currentUserId = currentUser.getUid();
+        final String userEmail = currentUser.getEmail();
+        
+        // Log the current user details for debugging
+        Log.d(TAG, "Current user - UID: " + currentUserId + ", Email: " + userEmail);
+        
+        // Get the sevarthId from SharedPreferences first - this is more reliable
+        String sevarthIdFromPrefs = getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                .getString("sevarth_id", null);
+                
+        if (sevarthIdFromPrefs != null && !sevarthIdFromPrefs.isEmpty()) {
+            Log.d(TAG, "Using sevarthId from SharedPreferences: " + sevarthIdFromPrefs);
+            setupAttendanceListener(sevarthIdFromPrefs, currentUserId);
+            return;
+        }
+        
+        // If user has email, extract probable sevarthId
+        String probableSevarthId = null;
+        if (userEmail != null && userEmail.contains("@")) {
+            probableSevarthId = userEmail.substring(0, userEmail.indexOf('@'));
+            Log.d(TAG, "Extracted probable sevarthId from email: " + probableSevarthId);
+            
+            // Save to shared preferences for future use
+            getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("sevarth_id", probableSevarthId)
+                .apply();
+                
+            // Use this probable sevarthId directly to query attendance
+            if (probableSevarthId != null && !probableSevarthId.isEmpty()) {
+                setupAttendanceListener(probableSevarthId, currentUserId);
+                return;
+            }
+        }
 
-        // First get the user document to retrieve sevarthId
+        // Try to find user document
+        Log.d(TAG, "Querying users collection for user with UID: " + currentUserId);
+        
         db.collection("users")
-            .whereEqualTo("uid", currentUser.getUid())
+            .whereEqualTo("uid", currentUserId)
             .get()
             .addOnSuccessListener(queryDocumentSnapshots -> {
-                Log.d(TAG, "User query returned " + queryDocumentSnapshots.size() + " documents");
+                Log.d(TAG, "User query by UID returned " + queryDocumentSnapshots.size() + " documents");
                 
                 if (!queryDocumentSnapshots.isEmpty()) {
                     // Get sevarthId from user document
                     String sevarthId = queryDocumentSnapshots.getDocuments()
                             .get(0).getString("sevarthId");
                     
-                    Log.d(TAG, "Retrieved sevarthId: " + sevarthId);
+                    Log.d(TAG, "Retrieved sevarthId from user document: " + sevarthId);
 
                     if (sevarthId != null && !sevarthId.isEmpty()) {
+                        // Save to shared preferences for future use
+                        getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .putString("sevarth_id", sevarthId)
+                            .apply();
+                            
                         // Set up real-time listener for this user's attendance records
                         setupAttendanceListener(sevarthId, currentUserId);
                     } else {
-                        Log.e(TAG, "sevarthId is null or empty");
-                        showLoading(false);
-                        showEmptyView(true);
-                        showError("Sevarth ID not found");
+                        Log.e(TAG, "sevarthId in user document is null or empty");
+                        // Try direct query instead of showing error
+                        tryDirectQuery();
                     }
                 } else {
-                    Log.e(TAG, "No user document found for UID: " + currentUser.getUid());
-                    showLoading(false);
-                    showEmptyView(true);
-                    showError("User details not found");
+                    // Try direct query
+                    tryDirectQuery();
                 }
             })
             .addOnFailureListener(e -> {
-                Log.e(TAG, "Error fetching user details: " + e.getMessage());
-                showLoading(false);
-                showError("Error loading user details: " + e.getMessage());
+                Log.e(TAG, "Failed to query user: " + e.getMessage());
+                tryDirectQuery();
             });
     }
     
@@ -227,113 +268,273 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
         Log.d(TAG, "Setting up real-time listener for sevarthId: " + sevarthId);
         
         try {
-            // Create a simple query without ordering to avoid index issues
+            // Create a query that checks both fields
             Log.d(TAG, "Querying 'face-recognition-attendance' collection for sevarthId: " + sevarthId);
             
-            // Query based on sevarthId instead of document ID
-            Query query = db.collection("face-recognition-attendance")
-                    .whereEqualTo("sevarthId", sevarthId);
+            // Clear any existing listener
+            if (attendanceListener != null) {
+                attendanceListener.remove();
+                attendanceListener = null;
+            }
+            
+            // Show something is happening
+            showLoading(true);
+            
+            // Try both ways of querying to be more tolerant across devices 
+            // First try the sevarthId query
+            db.collection("face-recognition-attendance")
+                .whereEqualTo("sevarthId", sevarthId)
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .get()
+                .addOnSuccessListener(snapshots -> {
+                    int count = snapshots.size();
+                    Log.d(TAG, "Query by sevarthId returned " + count + " records");
                     
-            // Set up the real-time listener
-            attendanceListener = query.addSnapshotListener((snapshots, e) -> {
-                if (e != null) {
-                    Log.e(TAG, "Listen failed: " + e.getMessage(), e);
-                    showError("Failed to listen for attendance updates: " + e.getMessage());
-                    showLoading(false);
-                    return;
+                    if (count > 0) {
+                        // We found records - process them
+                        processAttendanceSnapshots(snapshots);
+                    } else {
+                        // If no records found by sevarthId, try with userId
+                        tryBackupQuery(currentUserId);
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "Query by sevarthId failed: " + e.getMessage());
+                    // Try the backup query
+                    tryBackupQuery(currentUserId);
+                });
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting up attendance listener", e);
+            showError("Error: " + e.getMessage());
+            showLoading(false);
+            showEmptyView(true);
+        }
+    }
+    
+    private void processAttendanceSnapshots(com.google.firebase.firestore.QuerySnapshot snapshots) {
+        List<AttendanceRecord> records = new ArrayList<>();
+        
+        for (QueryDocumentSnapshot document : snapshots) {
+            try {
+                Log.d(TAG, "Processing document: " + document.getId());
+                AttendanceRecord record = document.toObject(AttendanceRecord.class);
+                record.setId(document.getId());
+                
+                // Add default values for missing fields to improve compatibility
+                if (record.getDate() == null) {
+                    // Try to extract date from timestamp
+                    com.google.firebase.Timestamp timestamp = document.getTimestamp("timestamp");
+                    if (timestamp != null) {
+                        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+                        dateFormat.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+                        record.setDate(dateFormat.format(timestamp.toDate()));
+                    } else {
+                        record.setDate("Unknown Date");
+                    }
                 }
-
-                if (snapshots == null) {
-                    Log.e(TAG, "Snapshot is null");
-                    showEmptyView(true);
-                    showLoading(false);
+                
+                if (record.getTime() == null) {
+                    // Try to extract time from timestamp
+                    com.google.firebase.Timestamp timestamp = document.getTimestamp("timestamp");
+                    if (timestamp != null) {
+                        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss", Locale.US);
+                        timeFormat.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
+                        record.setTime(timeFormat.format(timestamp.toDate()));
+                    } else {
+                        record.setTime("00:00:00");
+                    }
+                }
+                
+                if (record.getType() == null) {
+                    // Default to "Unknown" if type is missing
+                    record.setType("Unknown");
+                }
+                
+                // Log the record details
+                Log.d(TAG, "Record details: date=" + record.getDate() + 
+                           ", time=" + record.getTime() + 
+                           ", type=" + record.getType() + 
+                           ", office=" + record.getOfficeName());
+                
+                records.add(record);
+            } catch (Exception e) {
+                Log.e(TAG, "Error parsing document: " + document.getId(), e);
+            }
+        }
+        
+        // Update UI on main thread
+        runOnUiThread(() -> {
+            adapter.setRecords(records);
+            showLoading(false);
+            showEmptyView(records.isEmpty());
+            
+            if (!records.isEmpty()) {
+                binding.attendanceRecyclerView.scheduleLayoutAnimation();
+            }
+        });
+    }
+    
+    // Try a backup query using userId if sevarthId query returns no results
+    private void tryBackupQuery(String userId) {
+        if (userId == null || userId.isEmpty()) {
+            Log.e(TAG, "Cannot try backup query - userId is null or empty");
+            showEmptyView(true);
+            showLoading(false);
+            return;
+        }
+        
+        Log.d(TAG, "Trying backup query with userId: " + userId);
+        
+        db.collection("face-recognition-attendance")
+            .whereEqualTo("userId", userId)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .get()
+            .addOnSuccessListener(snapshots -> {
+                int count = snapshots.size();
+                Log.d(TAG, "Backup query returned " + count + " records");
+                
+                if (count == 0) {
+                    // If no records found with userId either, try a more basic query
+                    tryDirectQuery();
                     return;
                 }
                 
-                if (snapshots.isEmpty()) {
-                    Log.d(TAG, "No attendance records found for sevarthId: " + sevarthId);
-                    showEmptyView(true);
-                    showLoading(false);
-                    return;
-                }
-                
-                Log.d(TAG, "Attendance data updated, document count: " + snapshots.size());
                 List<AttendanceRecord> records = new ArrayList<>();
                 
-                // Process all documents
                 for (QueryDocumentSnapshot document : snapshots) {
                     try {
-                        Log.d(TAG, "Processing document: " + document.getId() + " with data: " + document.getData());
-                        
-                        // Create attendance record from document
-                        AttendanceRecord record = new AttendanceRecord();
+                        AttendanceRecord record = document.toObject(AttendanceRecord.class);
                         record.setId(document.getId());
-                        record.setDate(document.getString("date"));
-                        record.setStatus(document.getString("status"));
-                        record.setTime(document.getString("time"));
-                        record.setTimestamp(document.getTimestamp("timestamp"));
-                        record.setType(document.getString("type"));
-                        record.setUserId(document.getString("userId"));
-                        record.setUserName(document.getString("userName"));
-                        
-                        // Explicitly get sevarthId from the document
-                        String docSevarthId = document.getString("sevarthId");
-                        record.setSevarthId(docSevarthId);
-                        
-                        // Get the office name if it exists
-                        String officeName = document.getString("officeName");
-                        record.setOfficeName(officeName);
-                        
-                        // Try to get verification confidence if it exists
-                        if (document.contains("verificationConfidence")) {
-                            Double confidence = document.getDouble("verificationConfidence");
-                            if (confidence != null) {
-                                record.setVerificationConfidence(confidence);
-                            }
-                        }
-                        
                         records.add(record);
-                        Log.d(TAG, "Added attendance record: " + document.getId() + ", sevarthId: " + docSevarthId);
-                    } catch (Exception ex) {
-                        Log.e(TAG, "Error parsing document " + document.getId() + ": " + ex.getMessage(), ex);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error parsing document in backup query: " + document.getId(), e);
                     }
                 }
                 
-                // First group by sevarthId, then sort by timestamp (most recent first)
-                // Since we're already filtering by sevarthId in the query, this should give records for one user
-                // But this ensures correct sorting if multiple sevarthIds are somehow present
-                records.sort((r1, r2) -> {
-                    // First compare by sevarthId
-                    int sevarthCompare = 0;
-                    if (r1.getSevarthId() != null && r2.getSevarthId() != null) {
-                        sevarthCompare = r1.getSevarthId().compareTo(r2.getSevarthId());
-                    }
+                runOnUiThread(() -> {
+                    adapter.setRecords(records);
+                    showLoading(false);
+                    showEmptyView(records.isEmpty());
                     
-                    // If sevarthIds are the same, compare by timestamp (newest first)
-                    if (sevarthCompare == 0) {
-                        if (r1.getTimestamp() == null || r2.getTimestamp() == null) {
-                            return 0;
-                        }
-                        return r2.getTimestamp().compareTo(r1.getTimestamp());
+                    if (!records.isEmpty()) {
+                        binding.attendanceRecyclerView.scheduleLayoutAnimation();
                     }
-                    
-                    return sevarthCompare;
                 });
-                
-                // Update adapter with found records and apply current filter
-                Log.d(TAG, "Updating adapter with " + records.size() + " records, filter: " + currentFilter);
-                adapter.setRecords(records);
-                adapter.filterByType(currentFilter);
-                
-                // Show empty view if no records
-                showEmptyView(records.isEmpty());
-                showLoading(false);
+            })
+            .addOnFailureListener(e -> {
+                Log.e(TAG, "Backup query failed: " + e.getMessage(), e);
+                // If backup query fails, try a direct query as last resort
+                tryDirectQuery();
             });
-        } catch (Exception e) {
-            Log.e(TAG, "Error setting up attendance listener: " + e.getMessage(), e);
-            showError("Error setting up attendance updates: " + e.getMessage());
-            showLoading(false);
-        }
+    }
+    
+    // Last resort - try a direct query without where clause
+    private void tryDirectQuery() {
+        Log.d(TAG, "Trying direct query as last resort");
+        
+        // Remove the error message
+        runOnUiThread(() -> {
+            showLoading(true);
+            // Hide any error toast that might be showing
+            Toast.makeText(this, "Searching for attendance records...", Toast.LENGTH_SHORT).show();
+        });
+        
+        // Get the most recent 100 records and filter client-side
+        db.collection("face-recognition-attendance")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(100)
+            .get()
+            .addOnSuccessListener(snapshots -> {
+                int count = snapshots.size();
+                Log.d(TAG, "Direct query returned " + count + " total records");
+                
+                if (count == 0) {
+                    runOnUiThread(() -> {
+                        showEmptyView(true);
+                        showLoading(false);
+                        Toast.makeText(this, "No attendance records found in the system", Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+                
+                // Try to get current user
+                FirebaseUser currentUser = mAuth.getCurrentUser();
+                String userEmail = currentUser != null ? currentUser.getEmail() : null;
+                String userUid = currentUser != null ? currentUser.getUid() : null;
+                
+                Log.d(TAG, "Filtering records for user - UID: " + userUid + ", Email: " + userEmail);
+                
+                // Parse sevarthId from email if available
+                String probableSevarthId = null;
+                if (userEmail != null && userEmail.contains("@")) {
+                    probableSevarthId = userEmail.substring(0, userEmail.indexOf('@'));
+                    Log.d(TAG, "Extracted probable sevarthId from email for filtering: " + probableSevarthId);
+                }
+                
+                final String finalProbableSevarthId = probableSevarthId;
+                final String finalUserUid = userUid;
+                
+                List<AttendanceRecord> records = new ArrayList<>();
+                
+                for (QueryDocumentSnapshot document : snapshots) {
+                    try {
+                        // Try to client-side filter for current user's records
+                        String docSevarthId = document.getString("sevarthId");
+                        String docUserId = document.getString("userId");
+                        
+                        // Log document details for debugging
+                        Log.d(TAG, "Examining record: ID=" + document.getId() + 
+                              ", sevarthId=" + docSevarthId + 
+                              ", userId=" + docUserId);
+                        
+                        // Match by sevarthId or userId
+                        boolean matches = false;
+                        
+                        if (finalProbableSevarthId != null && finalProbableSevarthId.equals(docSevarthId)) {
+                            matches = true;
+                            Log.d(TAG, "Record matched by sevarthId");
+                        } else if (finalUserUid != null && finalUserUid.equals(docUserId)) {
+                            matches = true;
+                            Log.d(TAG, "Record matched by userId");
+                        }
+                        
+                        if (matches) {
+                            AttendanceRecord record = document.toObject(AttendanceRecord.class);
+                            record.setId(document.getId());
+                            
+                            // Add even if we couldn't map to an object
+                            if (record != null) {
+                                records.add(record);
+                                Log.d(TAG, "Added matching record: " + document.getId());
+                            }
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error parsing document in direct query: " + document.getId(), e);
+                    }
+                }
+                
+                runOnUiThread(() -> {
+                    adapter.setRecords(records);
+                    showLoading(false);
+                    showEmptyView(records.isEmpty());
+                    
+                    if (!records.isEmpty()) {
+                        binding.attendanceRecyclerView.scheduleLayoutAnimation();
+                    } else {
+                        // Show a more helpful message
+                        Toast.makeText(AttendanceHistoryActivity.this, 
+                            "No attendance records found for your account", Toast.LENGTH_LONG).show();
+                    }
+                });
+            })
+            .addOnFailureListener(e -> {
+                Log.e(TAG, "Direct query failed: " + e.getMessage(), e);
+                runOnUiThread(() -> {
+                    showEmptyView(true);
+                    showLoading(false);
+                    showError("Could not load attendance records");
+                });
+            });
     }
 
     private void showLoading(boolean show) {
@@ -348,12 +549,28 @@ public class AttendanceHistoryActivity extends AppCompatActivity {
     private void showEmptyView(boolean show) {
         binding.emptyView.setVisibility(show ? View.VISIBLE : View.GONE);
         binding.attendanceRecyclerView.setVisibility(show ? View.GONE : View.VISIBLE);
+        
         if (show) {
             binding.emptyView.startAnimation(AnimationUtils.loadAnimation(this, android.R.anim.fade_in));
+            
+            // Hide any error toast that's showing
+            // Replace any error shown at the bottom of the screen with the empty view text
+            View toastText = findViewById(android.R.id.message);
+            if (toastText != null && toastText.getParent() != null && toastText.getParent() instanceof ViewGroup) {
+                ((ViewGroup) toastText.getParent()).removeView(toastText);
+            }
         }
     }
-
+    
     private void showError(String message) {
+        if (message == null || message.isEmpty()) return;
+        
+        // Don't show "User not found" errors - we already handle this
+        if (message.contains("User") && message.contains("not found")) {
+            return;
+        }
+        
+        // Only show the toast if we have a meaningful error
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 

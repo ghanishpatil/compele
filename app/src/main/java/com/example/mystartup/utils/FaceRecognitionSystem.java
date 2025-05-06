@@ -10,7 +10,9 @@ import android.hardware.camera2.CameraManager;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.Display;
 import android.view.Surface;
 import android.widget.Toast;
 
@@ -146,49 +148,134 @@ public class FaceRecognitionSystem {
      * @param previewView The camera preview view
      */
     public void initializeCamera(LifecycleOwner lifecycleOwner, androidx.camera.view.PreviewView previewView) {
-        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = 
-                ProcessCameraProvider.getInstance(context);
+        // Check if already initialized to prevent duplicate initialization
+        if (cameraProvider != null) {
+            Log.d(TAG, "Camera already initialized, unbinding first");
+            cameraProvider.unbindAll();
+        }
         
-        cameraProviderFuture.addListener(() -> {
-            try {
-                cameraProvider = cameraProviderFuture.get();
-                
-                // Set up the preview use case with optimized settings
-                Preview preview = new Preview.Builder()
-                        .setTargetResolution(new android.util.Size(640, 480)) // Lower resolution for faster processing
-                        .build();
-                preview.setSurfaceProvider(previewView.getSurfaceProvider());
-                
-                // Set up image capture use case with optimized settings
-                imageCapture = new ImageCapture.Builder()
-                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                        .setTargetResolution(new android.util.Size(640, 480)) // Lower resolution for faster processing
-                        .build();
-                
-                // Select front camera
-                CameraSelector cameraSelector = new CameraSelector.Builder()
-                        .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
-                        .build();
-                
-                // Unbind any bound use cases before rebinding
-                cameraProvider.unbindAll();
-                
-                // Bind use cases to camera
-                cameraProvider.bindToLifecycle(
-                        lifecycleOwner, 
-                        cameraSelector, 
-                        preview, 
-                        imageCapture);
-                
-                Log.d(TAG, "Camera initialization successful");
-                
-            } catch (ExecutionException | InterruptedException e) {
-                Log.e(TAG, "Camera initialization failed: " + e.getMessage());
-                if (verificationListener != null) {
-                    verificationListener.onVerificationError("Camera initialization failed: " + e.getMessage());
+        Log.d(TAG, "Initializing camera...");
+        
+        try {
+            ListenableFuture<ProcessCameraProvider> cameraProviderFuture = 
+                    ProcessCameraProvider.getInstance(context);
+            
+            cameraProviderFuture.addListener(() -> {
+                try {
+                    cameraProvider = cameraProviderFuture.get();
+                    
+                    // Get device orientation for best camera setup
+                    int rotation = getDeviceRotation();
+                    Log.d(TAG, "Device rotation: " + rotation);
+                    
+                    // Get display metrics to calculate appropriate resolution
+                    DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+                    int screenWidth = metrics.widthPixels;
+                    int screenHeight = metrics.heightPixels;
+                    Log.d(TAG, "Screen dimensions: " + screenWidth + "x" + screenHeight);
+                    
+                    // Calculate target resolution based on device screen size
+                    // We're using a 4:3 aspect ratio for better face detection
+                    int targetWidth = Math.min(640, screenWidth);
+                    int targetHeight = (targetWidth * 4) / 3; // 4:3 aspect ratio
+                    android.util.Size targetSize = new android.util.Size(targetWidth, targetHeight);
+                    
+                    Log.d(TAG, "Using target resolution: " + targetWidth + "x" + targetHeight);
+                    
+                    // Set up the preview use case with optimized settings
+                    Preview preview = new Preview.Builder()
+                            .setTargetResolution(targetSize)
+                            .setTargetRotation(rotation)
+                            .build();
+                    
+                    preview.setSurfaceProvider(previewView.getSurfaceProvider());
+                    
+                    // Set up image capture use case with optimized settings
+                    imageCapture = new ImageCapture.Builder()
+                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                            .setTargetResolution(targetSize)
+                            .setTargetRotation(rotation)
+                            .build();
+                    
+                    // Select front camera
+                    CameraSelector cameraSelector = new CameraSelector.Builder()
+                            .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
+                            .build();
+                    
+                    // Unbind any bound use cases before rebinding
+                    cameraProvider.unbindAll();
+                    
+                    // Bind use cases to camera
+                    cameraProvider.bindToLifecycle(
+                            lifecycleOwner, 
+                            cameraSelector, 
+                            preview, 
+                            imageCapture);
+                    
+                    Log.d(TAG, "Camera initialization successful");
+                    
+                    // Ensure flash is disabled for front camera (can cause issues on some devices)
+                    try {
+                        CameraManager cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+                        String[] cameraIds = cameraManager.getCameraIdList();
+                        for (String id : cameraIds) {
+                            if (cameraManager.getCameraCharacteristics(id).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == 
+                                    android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) {
+                                if (cameraManager.getCameraCharacteristics(id).get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true) {
+                                    cameraManager.setTorchMode(id, false);
+                                }
+                                break;
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Just log the error but continue - flash control is not critical
+                        Log.w(TAG, "Failed to control flash: " + e.getMessage());
+                    }
+                    
+                } catch (ExecutionException e) {
+                    Log.e(TAG, "Camera initialization failed (ExecutionException): " + e.getMessage(), e);
+                    if (verificationListener != null) {
+                        verificationListener.onVerificationError("Camera initialization failed: " + e.getCause().getMessage());
+                    }
+                } catch (InterruptedException e) {
+                    Log.e(TAG, "Camera initialization failed (InterruptedException): " + e.getMessage(), e);
+                    if (verificationListener != null) {
+                        verificationListener.onVerificationError("Camera initialization was interrupted");
+                    }
+                    Thread.currentThread().interrupt(); // Restore interrupted state
+                } catch (IllegalArgumentException e) {
+                    Log.e(TAG, "Camera initialization failed (IllegalArgumentException): " + e.getMessage(), e);
+                    if (verificationListener != null) {
+                        verificationListener.onVerificationError("Camera configuration error: " + e.getMessage());
+                    }
+                } catch (IllegalStateException e) {
+                    Log.e(TAG, "Camera initialization failed (IllegalStateException): " + e.getMessage(), e);
+                    if (verificationListener != null) {
+                        verificationListener.onVerificationError("Camera is in an illegal state: " + e.getMessage());
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Camera initialization failed (General Exception): " + e.getMessage(), e);
+                    if (verificationListener != null) {
+                        verificationListener.onVerificationError("Camera initialization failed: " + e.getMessage());
+                    }
                 }
+            }, ContextCompat.getMainExecutor(context));
+        } catch (Exception e) {
+            Log.e(TAG, "Fatal error initializing camera: " + e.getMessage(), e);
+            if (verificationListener != null) {
+                verificationListener.onVerificationError("Failed to initialize camera system: " + e.getMessage());
             }
-        }, ContextCompat.getMainExecutor(context));
+        }
+    }
+    
+    /**
+     * Get the current device rotation
+     * @return Device rotation as Surface.ROTATION_x constant
+     */
+    private int getDeviceRotation() {
+        android.view.WindowManager windowManager = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        android.view.Display display = windowManager.getDefaultDisplay();
+        return display.getRotation();
     }
     
     /**
@@ -341,63 +428,153 @@ public class FaceRecognitionSystem {
             return;
         }
         
-        // Create unique filename for temporary file
-        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        String fileName = "FACE_" + timestamp + "_" + UUID.randomUUID().toString() + ".jpg";
-        File outputDir = new File(context.getCacheDir(), "face_captures");
-        if (!outputDir.exists()) {
-            outputDir.mkdirs();
-        }
-        File photoFile = new File(outputDir, fileName);
-        
-        // Create output options object
-        ImageCapture.OutputFileOptions outputOptions = 
-                new ImageCapture.OutputFileOptions.Builder(photoFile).build();
-        
-        // Take the picture
-        imageCapture.takePicture(outputOptions, ContextCompat.getMainExecutor(context),
-                new ImageCapture.OnImageSavedCallback() {
-                    @Override
-                    public void onImageSaved(@NonNull ImageCapture.OutputFileResults outputFileResults) {
-                        try {
-                            // Read the saved image
-                            BitmapFactory.Options options = new BitmapFactory.Options();
-                            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-                            Bitmap capturedBitmap = BitmapFactory.decodeFile(photoFile.getAbsolutePath(), options);
-                            
-                            // Ensure the bitmap is not null
-                            if (capturedBitmap == null) {
-                                if (verificationListener != null) {
-                                    verificationListener.onVerificationError("Failed to process captured image.");
-                                }
-                                callback.onImageCaptured(null);
-                                return;
-                            }
-                            
-                            // Check if a face is detectable in the image
-                            detectFaceInBitmap(capturedBitmap, faceDetected -> {
-                                try {
-                                    if (!faceDetected) {
-                                        if (verificationListener != null) {
-                                            verificationListener.onVerificationError("No face detected in the captured image. Please try again.");
-                                        }
-                                        callback.onImageCaptured(null);
-                                        return;
+        try {
+            // Create unique filename for temporary file
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+            String fileName = "FACE_" + timestamp + "_" + UUID.randomUUID().toString() + ".jpg";
+            File outputDir = new File(context.getCacheDir(), "face_captures");
+            if (!outputDir.exists()) {
+                outputDir.mkdirs();
+            }
+            File photoFile = new File(outputDir, fileName);
+            
+            // Create output options object
+            ImageCapture.OutputFileOptions outputOptions = 
+                    new ImageCapture.OutputFileOptions.Builder(photoFile).build();
+            
+            // Log image capture attempt
+            Log.d(TAG, "Attempting to capture image to: " + photoFile.getAbsolutePath());
+            
+            // Take the picture - use the main thread executor for consistent behavior
+            final Executor mainExecutor = ContextCompat.getMainExecutor(context);
+            
+            // Set flash mode to off explicitly to avoid issues on some devices
+            imageCapture.setFlashMode(ImageCapture.FLASH_MODE_OFF);
+            
+            imageCapture.takePicture(outputOptions, mainExecutor,
+                    new ImageCapture.OnImageSavedCallback() {
+                        @Override
+                        public void onImageSaved(@NonNull ImageCapture.OutputFileResults outputFileResults) {
+                            try {
+                                // Verify file exists and has content
+                                if (!photoFile.exists() || photoFile.length() == 0) {
+                                    Log.e(TAG, "Image file doesn't exist or is empty");
+                                    if (verificationListener != null) {
+                                        verificationListener.onVerificationError("Failed to save captured image");
                                     }
-                                    
-                                    // Return the bitmap
-                                    callback.onImageCaptured(capturedBitmap);
-                                } finally {
-                                    // Clean up the temporary file
+                                    callback.onImageCaptured(null);
+                                    return;
+                                }
+                                
+                                Log.d(TAG, "Image saved successfully at: " + photoFile.getAbsolutePath() + 
+                                          " (Size: " + photoFile.length() + " bytes)");
+                                
+                                // Read the saved image with optimized settings
+                                BitmapFactory.Options options = new BitmapFactory.Options();
+                                options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                                
+                                // First check if file can be decoded before loading full bitmap
+                                options.inJustDecodeBounds = true;
+                                BitmapFactory.decodeFile(photoFile.getAbsolutePath(), options);
+                                
+                                if (options.outWidth <= 0 || options.outHeight <= 0) {
+                                    Log.e(TAG, "Invalid image dimensions: " + options.outWidth + "x" + options.outHeight);
+                                    if (verificationListener != null) {
+                                        verificationListener.onVerificationError("Captured image is invalid");
+                                    }
+                                    callback.onImageCaptured(null);
+                                    // Clean up
                                     if (photoFile.exists()) {
                                         photoFile.delete();
                                     }
+                                    return;
                                 }
-                            });
-                        } catch (Exception e) {
-                            Log.e(TAG, "Error processing captured image: " + e.getMessage());
+                                
+                                // Load the actual bitmap
+                                options.inJustDecodeBounds = false;
+                                options.inSampleSize = calculateInSampleSize(options, 640, 480); // Downsample large images
+                                Bitmap capturedBitmap = BitmapFactory.decodeFile(photoFile.getAbsolutePath(), options);
+                                
+                                // Ensure the bitmap is not null
+                                if (capturedBitmap == null) {
+                                    Log.e(TAG, "Failed to decode image file into bitmap");
+                                    if (verificationListener != null) {
+                                        verificationListener.onVerificationError("Failed to process captured image");
+                                    }
+                                    callback.onImageCaptured(null);
+                                    // Clean up
+                                    if (photoFile.exists()) {
+                                        photoFile.delete();
+                                    }
+                                    return;
+                                }
+                                
+                                // Log successful bitmap creation
+                                Log.d(TAG, "Bitmap created successfully: " + capturedBitmap.getWidth() + "x" + 
+                                      capturedBitmap.getHeight());
+                                
+                                // Check if a face is detectable in the image
+                                detectFaceInBitmap(capturedBitmap, faceDetected -> {
+                                    try {
+                                        if (!faceDetected) {
+                                            Log.w(TAG, "No face detected in captured image");
+                                            
+                                            // Try with a more permissive detector as fallback for challenging light/camera conditions
+                                            detectFaceWithFallback(capturedBitmap, fallbackDetected -> {
+                                                if (fallbackDetected) {
+                                                    Log.d(TAG, "Face detected with fallback detector");
+                                                    callback.onImageCaptured(capturedBitmap);
+                                                } else {
+                                                    if (verificationListener != null) {
+                                                        verificationListener.onVerificationError("No face detected in the captured image. Please try again with better lighting.");
+                                                    }
+                                                    callback.onImageCaptured(null);
+                                                }
+                                                
+                                                // Clean up the temporary file
+                                                if (photoFile.exists()) {
+                                                    photoFile.delete();
+                                                }
+                                            });
+                                        } else {
+                                            Log.d(TAG, "Face successfully detected in captured image");
+                                            // Return the bitmap
+                                            callback.onImageCaptured(capturedBitmap);
+                                            
+                                            // Clean up the temporary file
+                                            if (photoFile.exists()) {
+                                                photoFile.delete();
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        Log.e(TAG, "Error in face detection: " + e.getMessage(), e);
+                                        callback.onImageCaptured(null);
+                                        
+                                        // Clean up on error
+                                        if (photoFile.exists()) {
+                                            photoFile.delete();
+                                        }
+                                    }
+                                });
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error processing captured image: " + e.getMessage(), e);
+                                if (verificationListener != null) {
+                                    verificationListener.onVerificationError("Error processing captured image: " + e.getMessage());
+                                }
+                                callback.onImageCaptured(null);
+                                
+                                // Clean up on error
+                                if (photoFile.exists()) {
+                                    photoFile.delete();
+                                }
+                            }
+                        }
+                        
+                        @Override
+                        public void onError(@NonNull ImageCaptureException exception) {
+                            Log.e(TAG, "Image capture failed: " + exception.getMessage(), exception);
                             if (verificationListener != null) {
-                                verificationListener.onVerificationError("Error processing captured image: " + e.getMessage());
+                                verificationListener.onVerificationError("Image capture failed: " + exception.getMessage());
                             }
                             callback.onImageCaptured(null);
                             
@@ -406,21 +583,64 @@ public class FaceRecognitionSystem {
                                 photoFile.delete();
                             }
                         }
-                    }
-                    
-                    @Override
-                    public void onError(@NonNull ImageCaptureException exception) {
-                        Log.e(TAG, "Image capture failed: " + exception.getMessage());
-                        if (verificationListener != null) {
-                            verificationListener.onVerificationError("Image capture failed: " + exception.getMessage());
-                        }
-                        callback.onImageCaptured(null);
-                        
-                        // Clean up on error
-                        if (photoFile.exists()) {
-                            photoFile.delete();
-                        }
-                    }
+                    });
+        } catch (Exception e) {
+            Log.e(TAG, "Unexpected error during image capture setup: " + e.getMessage(), e);
+            if (verificationListener != null) {
+                verificationListener.onVerificationError("Failed to set up image capture: " + e.getMessage());
+            }
+            callback.onImageCaptured(null);
+        }
+    }
+    
+    /**
+     * Calculate appropriate sample size for loading bitmaps efficiently
+     */
+    private int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
+        // Raw height and width of image
+        final int height = options.outHeight;
+        final int width = options.outWidth;
+        int inSampleSize = 1;
+    
+        if (height > reqHeight || width > reqWidth) {
+            final int halfHeight = height / 2;
+            final int halfWidth = width / 2;
+    
+            // Calculate the largest inSampleSize value that is a power of 2 and keeps both
+            // height and width larger than the requested height and width.
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2;
+            }
+        }
+        
+        return inSampleSize;
+    }
+    
+    /**
+     * Fallback method with more permissive settings to detect faces in challenging conditions
+     */
+    private void detectFaceWithFallback(Bitmap bitmap, OnFaceDetectedCallback callback) {
+        InputImage image = InputImage.fromBitmap(bitmap, 0);
+        
+        // Ultra permissive detector for fallback
+        FaceDetectorOptions options = new FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE) // Use accurate mode
+                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                .setMinFaceSize(0.05f) // Very small minimum face size
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
+                .build();
+        
+        FaceDetection.getClient(options).process(image)
+                .addOnSuccessListener(faces -> {
+                    boolean faceDetected = !faces.isEmpty();
+                    Log.d(TAG, "Fallback face detection result: " + (faceDetected ? "Face detected" : "No face detected") + 
+                          " (found " + faces.size() + " faces)");
+                    callback.onResult(faceDetected);
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "Fallback face detection failed: " + e.getMessage());
+                    callback.onResult(false);
                 });
     }
     
@@ -434,12 +654,14 @@ public class FaceRecognitionSystem {
         // Create input image with optimized settings
         InputImage image = InputImage.fromBitmap(bitmap, 0);
         
-        // Configure face detector for speed
+        // Configure face detector for better cross-device compatibility
+        // Using a smaller minimum face size to detect faces that might be further from camera
         FaceDetectorOptions options = new FaceDetectorOptions.Builder()
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
                 .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
                 .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
-                .setMinFaceSize(0.35f)
+                .setMinFaceSize(0.1f) // Reduced from 0.35f for better detection across devices
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
                 .build();
         
         FaceDetector detector = FaceDetection.getClient(options);
@@ -447,6 +669,16 @@ public class FaceRecognitionSystem {
         detector.process(image)
                 .addOnSuccessListener(faces -> {
                     boolean faceDetected = !faces.isEmpty();
+                    Log.d(TAG, "Face detection result: " + (faceDetected ? "Face detected" : "No face detected") + 
+                          " (found " + faces.size() + " faces)");
+                    if (faceDetected && faces.size() > 0) {
+                        // Log face bounds to help with debugging
+                        Face face = faces.get(0);
+                        Rect bounds = face.getBoundingBox();
+                        Log.d(TAG, "Detected face bounds: " + bounds.left + "," + bounds.top + 
+                              " to " + bounds.right + "," + bounds.bottom + 
+                              " (size: " + bounds.width() + "x" + bounds.height() + ")");
+                    }
                     callback.onResult(faceDetected);
                 })
                 .addOnFailureListener(e -> {
@@ -518,12 +750,12 @@ public class FaceRecognitionSystem {
         // Create input image with optimized settings
         InputImage image = InputImage.fromBitmap(bitmap, 0);
         
-        // Configure face detector for accuracy in feature extraction
+        // Configure face detector for accuracy in feature extraction but with better cross-device compatibility
         FaceDetectorOptions options = new FaceDetectorOptions.Builder()
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
                 .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
                 .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-                .setMinFaceSize(0.35f)
+                .setMinFaceSize(0.1f) // Reduced from 0.35f for better detection across devices
                 .build();
         
         FaceDetector detector = FaceDetection.getClient(options);

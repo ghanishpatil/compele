@@ -327,6 +327,106 @@ public class FaceRecognitionRepository {
     }
     
     /**
+     * Mark attendance with a pre-configured request object
+     * 
+     * @param request The attendance request with all required fields
+     * @param callback Callback for the result
+     */
+    public void markAttendanceWithRequest(AttendanceRequest request, RepositoryCallback<AttendanceResponse> callback) {
+        if (request == null) {
+            callback.onError("Request object cannot be null");
+            return;
+        }
+        
+        // Log request details for debugging
+        Log.d(TAG, "Marking attendance with request: sevarthId=" + request.getSevarthId() + 
+                ", attendanceType=" + request.getType() + 
+                ", locationId=" + request.getLocationId() + 
+                ", locationName=" + request.getLocationName());
+        
+        // Call API
+        apiService.markAttendance(request).enqueue(new Callback<AttendanceResponse>() {
+            @Override
+            public void onResponse(Call<AttendanceResponse> call, Response<AttendanceResponse> response) {
+                // Log full response for debugging
+                Log.d(TAG, "Server response code: " + response.code());
+                try {
+                    if (response.isSuccessful() && response.body() != null) {
+                        // Log the entire response object
+                        Log.d(TAG, "Attendance response: " + response.body().toString());
+                        
+                        // Check if response indicates error even though HTTP code was success
+                        if (response.body().isError()) {
+                            Log.e(TAG, "Error response with success HTTP code: " + response.body().getMessage());
+                            callback.onError(response.body().getMessage());
+                        } else {
+                            Log.d(TAG, "Attendance marked successfully: " + response.body().getMessage());
+                            callback.onSuccess(response.body());
+                            
+                            // Also save to local Firestore to ensure redundancy
+                            saveToLocalFirestore(request);
+                        }
+                    } else {
+                        String errorJson = response.errorBody() != null ? response.errorBody().string() : "Unknown error";
+                        Log.e(TAG, "Error marking attendance: " + errorJson);
+                        
+                        // Try to extract a more user-friendly error message
+                        String errorMessage = extractErrorMessage(errorJson);
+                        callback.onError(errorMessage);
+                    }
+                } catch (IOException e) {
+                    Log.e(TAG, "Failed to parse error response", e);
+                    callback.onError("Network error: " + e.getMessage());
+                }
+            }
+            
+            @Override
+            public void onFailure(Call<AttendanceResponse> call, Throwable t) {
+                Log.e(TAG, "Network failure marking attendance", t);
+                callback.onError("Network error: " + t.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * Helper method to save attendance to local Firestore as backup
+     */
+    private void saveToLocalFirestore(AttendanceRequest request) {
+        try {
+            // Create a simple Firestore repository if needed
+            if (firestoreRepository == null) {
+                firestoreRepository = new FirestoreAttendanceRepository();
+            }
+            
+            // Save attendance record locally with location information
+            firestoreRepository.saveAttendance(
+                request.getSevarthId(),
+                request.getUserId(),
+                request.getUserName(),
+                request.getType(),
+                request.getVerificationConfidence(),
+                request.getLocationId(),
+                request.getLocationName(),
+                new FirestoreAttendanceRepository.AttendanceCallback() {
+                    @Override
+                    public void onSuccess(String docId) {
+                        Log.d(TAG, "Backup attendance record saved locally with ID: " + docId);
+                    }
+                    
+                    @Override
+                    public void onError(String errorMessage) {
+                        Log.w(TAG, "Failed to save backup attendance record: " + errorMessage);
+                    }
+                });
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving backup attendance record", e);
+        }
+    }
+    
+    // Keep a single Firestore repository instance
+    private FirestoreAttendanceRepository firestoreRepository;
+    
+    /**
      * Repository callback interface
      */
     public interface RepositoryCallback<T> {

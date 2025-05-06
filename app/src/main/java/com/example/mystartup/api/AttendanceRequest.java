@@ -24,6 +24,9 @@ public class AttendanceRequest {
     @SerializedName("uid")
     private String userId;
     
+    @SerializedName("location_name")
+    private String locationName;
+    
     // Simple constructor for backward compatibility
     public AttendanceRequest(String sevarthId, String type, float verificationConfidence, String locationId) {
         this.sevarthId = sevarthId;
@@ -89,5 +92,13 @@ public class AttendanceRequest {
     
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+    
+    public String getLocationName() {
+        return locationName;
+    }
+    
+    public void setLocationName(String locationName) {
+        this.locationName = locationName;
     }
 } 

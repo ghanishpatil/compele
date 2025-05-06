@@ -17,6 +17,7 @@ import androidx.camera.view.PreviewView;
 import androidx.fragment.app.FragmentTransaction;
 
 import com.example.mystartup.R;
+import com.example.mystartup.api.AttendanceRequest;
 import com.example.mystartup.api.AttendanceResponse;
 import com.example.mystartup.api.FaceVerificationResponse;
 import com.example.mystartup.databinding.FragmentUserAttendanceBinding;
@@ -82,33 +83,59 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        mAuth = FirebaseAuth.getInstance();
-        db = FirebaseFirestore.getInstance();
-        faceRepository = new FaceRecognitionRepository();
-        firestoreAttendanceRepository = new FirestoreAttendanceRepository();
         
-        // Get location details from arguments
-        Bundle args = getArguments();
-        if (args != null) {
-            locationId = args.getString("location_id", "");
-            locationName = args.getString("location_name", "");
-            officeLatitude = args.getFloat("location_latitude", 0f);
-            officeLongitude = args.getFloat("location_longitude", 0f);
-            officeRadius = args.getInt("location_radius", 100);
+        try {
+            mAuth = FirebaseAuth.getInstance();
+            db = FirebaseFirestore.getInstance();
+            faceRepository = new FaceRecognitionRepository();
+            firestoreAttendanceRepository = new FirestoreAttendanceRepository();
             
-            Log.d(TAG, "Office location loaded: " + locationName + 
-                  " (ID: " + locationId + ", " +
-                  "Lat: " + officeLatitude + 
-                  ", Lng: " + officeLongitude + 
-                  ", Radius: " + officeRadius + "m)");
+            // Get location details from arguments
+            Bundle args = getArguments();
+            if (args != null) {
+                locationId = args.getString("location_id", "");
+                locationName = args.getString("location_name", "");
+                officeLatitude = args.getFloat("location_latitude", 0f);
+                officeLongitude = args.getFloat("location_longitude", 0f);
+                officeRadius = args.getInt("location_radius", 100);
+                
+                Log.d(TAG, "Office location loaded: " + locationName + 
+                      " (ID: " + locationId + ", " +
+                      "Lat: " + officeLatitude + 
+                      ", Lng: " + officeLongitude + 
+                      ", Radius: " + officeRadius + "m)");
+            } else {
+                Log.e(TAG, "No location arguments provided to fragment!");
+                // Initialize with default values
+                locationId = "";
+                locationName = "";
+                officeLatitude = 0;
+                officeLongitude = 0;
+                officeRadius = 100;
+            }
             
-            // Even if coordinates are (0,0), don't show warning - we're suppressing the error
-            // This will treat any location as valid even with incomplete data
-        } else {
-            Log.e(TAG, "No location arguments provided to fragment!");
+            // Ensure we don't crash even if user data fails to load
+            try {
+                loadUserDetails();
+            } catch (Exception e) {
+                Log.e(TAG, "Error loading user details: " + e.getMessage(), e);
+                // Continue with default/empty values
+                userId = "";
+                userName = "User";
+                sevarthId = "";
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in fragment onCreate: " + e.getMessage(), e);
+            // Initialize with default values
+            locationId = "";
+            locationName = "";
+            officeLatitude = 0;
+            officeLongitude = 0;
+            officeRadius = 100;
+            userId = "";
+            userName = "User";
+            sevarthId = "";
         }
-        
-        loadUserDetails();
     }
 
     @Nullable
@@ -121,24 +148,59 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        setupCurrentDate();
-        setupButtons();
-        initializeFaceRecognition();
         
-        // Initialize location manager
-        locationManager = (LocationManager) requireActivity().getSystemService(Context.LOCATION_SERVICE);
-        
-        // Show office location name
-        if (locationName != null && !locationName.isEmpty()) {
-            binding.locationNameText.setText("Office: " + locationName);
-            binding.locationNameText.setVisibility(View.VISIBLE);
+        try {
+            setupCurrentDate();
+            setupButtons();
+            
+            try {
+                initializeFaceRecognition();
+            } catch (Exception e) {
+                Log.e(TAG, "Error initializing face recognition: " + e.getMessage(), e);
+                if (binding != null) {
+                    binding.faceRecognitionStatus.setVisibility(View.GONE);
+                }
+            }
+            
+            // Initialize location manager
+            try {
+                locationManager = (LocationManager) requireActivity().getSystemService(Context.LOCATION_SERVICE);
+            } catch (Exception e) {
+                Log.e(TAG, "Error getting location manager: " + e.getMessage(), e);
+            }
+            
+            // Show office location name from our arguments, not from user data
+            if (binding != null && locationName != null && !locationName.isEmpty()) {
+                Log.d(TAG, "Setting location name in view: " + locationName);
+                binding.locationNameText.setText("Office: " + locationName);
+                binding.locationNameText.setVisibility(View.VISIBLE);
+            } else {
+                Log.w(TAG, "Location name is empty or null");
+            }
+            
+            // Hide any location error message that might be shown
+            hideLocationErrorMessage();
+            
+            // Request location permissions and start location updates
+            try {
+                requestLocationPermissions();
+            } catch (Exception e) {
+                Log.e(TAG, "Error requesting location permissions: " + e.getMessage(), e);
+                // Do NOT enable buttons automatically - it should depend on actual location
+                updateCheckInButtonState(false);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onViewCreated: " + e.getMessage(), e);
+            // Do NOT enable buttons automatically - it should depend on actual location
+            try {
+                if (binding != null) {
+                    binding.checkInButton.setEnabled(false);
+                    binding.checkOutButton.setEnabled(false);
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, "Critical error setting up UI: " + ex.getMessage(), ex);
+            }
         }
-        
-        // Hide any location error message that might be shown
-        hideLocationErrorMessage();
-        
-        // Request location permissions and start location updates
-        requestLocationPermissions();
     }
     
     private void requestLocationPermissions() {
@@ -238,19 +300,24 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
     }
     
     private void updateCheckInButtonState(boolean isInRange) {
-        // Always enable the buttons regardless of location status
-        // But still store the actual status for reference
-        this.isWithinOfficeRadius = true; // Force to true
+        // Store the actual location status
+        this.isWithinOfficeRadius = isInRange;
         
         if (binding != null) {
-            // Always enable buttons
-            binding.checkInButton.setEnabled(true);
-            binding.checkOutButton.setEnabled(true);
+            // Only enable buttons if user is in range
+            binding.checkInButton.setEnabled(isInRange);
+            binding.checkOutButton.setEnabled(isInRange);
             
-            // Always show "In office range" status 
+            // Show appropriate status
             binding.locationStatusText.setVisibility(View.VISIBLE);
-            binding.locationStatusText.setText("✓ In office range");
-            binding.locationStatusText.setTextColor(ContextCompat.getColor(requireContext(), R.color.green_success));
+            
+            if (isInRange) {
+                binding.locationStatusText.setText("✓ In office range");
+                binding.locationStatusText.setTextColor(ContextCompat.getColor(requireContext(), R.color.green_success));
+            } else {
+                binding.locationStatusText.setText("✗ Outside office range");
+                binding.locationStatusText.setTextColor(ContextCompat.getColor(requireContext(), R.color.error_red));
+            }
         }
     }
     
@@ -289,22 +356,24 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
                             binding.faceRecognitionStatus.setText("Face recognition system ready");
                             binding.faceRecognitionStatus.setBackgroundResource(R.color.green_success);
                         } else {
-                            binding.faceRecognitionStatus.setText("Error: User details not found");
-                            binding.faceRecognitionStatus.setBackgroundResource(R.color.error_red);
+                            // Don't show an error in the UI, just log it
+                            Log.e(TAG, "User details not found in Firestore for face verification");
+                            binding.faceRecognitionStatus.setVisibility(View.GONE);
                         }
                     })
                     .addOnFailureListener(e -> {
-                        binding.faceRecognitionStatus.setText("Error: Failed to load user details - " + e.getMessage());
-                        binding.faceRecognitionStatus.setBackgroundResource(R.color.error_red);
+                        // Don't show an error in the UI, just log it
+                        Log.e(TAG, "Failed to load user details for face verification: " + e.getMessage());
+                        binding.faceRecognitionStatus.setVisibility(View.GONE);
                     });
             } else {
-                binding.faceRecognitionStatus.setText("Error: User not logged in");
-                binding.faceRecognitionStatus.setBackgroundResource(R.color.error_red);
+                // Don't show an error in the UI, just log it
+                Log.e(TAG, "User not logged in for face verification");
+                binding.faceRecognitionStatus.setVisibility(View.GONE);
             }
         } catch (Exception e) {
             Log.e(TAG, "Error initializing face recognition: " + e.getMessage(), e);
-            binding.faceRecognitionStatus.setText("Error: Face recognition initialization failed - " + e.getMessage());
-            binding.faceRecognitionStatus.setBackgroundResource(R.color.error_red);
+            binding.faceRecognitionStatus.setVisibility(View.GONE);
         }
     }
 
@@ -433,7 +502,7 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
                 if (user != null) {
                     userId = user.getUid();
                     Log.w(TAG, "Using Firebase Auth UID as fallback: " + userId);
-                        } else {
+                } else {
                     Log.e(TAG, "User UID missing in Firestore and Firebase Auth");
                     Toast.makeText(requireContext(), "User profile incomplete. Contact administrator.", Toast.LENGTH_LONG).show();
                 }
@@ -444,38 +513,9 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
                 Log.w(TAG, "User name missing, using default");
             }
             
-            // Get location details
-            Object locationIdsObj = userData.get("locationIds");
-            if (locationIdsObj instanceof List) {
-                List<String> locationIds = (List<String>) locationIdsObj;
-                if (!locationIds.isEmpty()) {
-                    locationId = locationIds.get(0);
-                    Log.d(TAG, "User's first location ID: " + locationId);
-                    
-                    // Get location name if available
-                    Object locationNamesObj = userData.get("locationNames");
-                    if (locationNamesObj instanceof List) {
-                        List<String> locationNames = (List<String>) locationNamesObj;
-                        if (!locationNames.isEmpty()) {
-                            locationName = locationNames.get(0);
-                            Log.d(TAG, "User's first location name: " + locationName);
-                            binding.locationNameText.setText("Office: " + locationName);
-                            binding.locationNameText.setVisibility(View.VISIBLE);
-                        }
-                    }
-                    
-                    // Get location coordinates for proximity check
-                    if (locationId != null && !locationId.isEmpty()) {
-                        updateLocationDetails(locationId);
-                    }
-                } else {
-                    Log.e(TAG, "User has no assigned locations");
-                    Toast.makeText(requireContext(), "No office location assigned to your profile.", Toast.LENGTH_LONG).show();
-                }
-            } else {
-                Log.e(TAG, "Location IDs not found or not in expected format");
-                Toast.makeText(requireContext(), "Office location data missing. Contact administrator.", Toast.LENGTH_LONG).show();
-            }
+            // DO NOT override the locationId and locationName that were passed to the fragment
+            // We should respect the user's selection from LocationSelectionActivity
+            Log.d(TAG, "Keeping selected location: " + locationName + " (ID: " + locationId + ")");
         }
         
         updateWelcomeText();
@@ -660,6 +700,17 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
             Log.w(TAG, "Using default user name because actual name is missing");
         }
         
+        // Also ensure we have a valid location name
+        if (locationName == null || locationName.isEmpty()) {
+            // Try to get location name from SharedPreferences
+            SharedPreferences prefs = requireActivity().getSharedPreferences("AuthPrefs", Context.MODE_PRIVATE);
+            locationName = prefs.getString("selected_location_name", "Unknown Office");
+            Log.d(TAG, "Retrieved location name from SharedPreferences: " + locationName);
+        }
+        
+        // Log the actual location info being used
+        Log.d(TAG, "Using location for attendance: ID=" + locationId + ", Name=" + locationName);
+        
         // Create and show dialog
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_face_verification, null);
         androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(requireContext())
@@ -683,39 +734,47 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
         // Debug: Log user details
         Log.d(TAG, "Starting verification with: sevarthId=" + sevarthId + 
               ", name='" + userName + "', userId=" + userId + 
-              ", locationId=" + locationId);
+              ", locationId=" + locationId +
+              ", locationName=" + locationName);
+              
+        // Save final variables for use in lambda
+        final String finalLocationId = locationId;
+        final String finalLocationName = locationName;
+        final String finalUserName = userName;
+        final String finalUserId = userId;
               
         // Slight delay to allow dialog to fully render
         new android.os.Handler().postDelayed(() -> {
             if (isAdded() && faceRecognitionSystem != null) {
-                statusText.setText("Capturing face image...");
+                statusText.setText("Initializing camera...");
             
-            // Initialize camera and start verification process immediately
-            faceRecognitionSystem.initializeCamera(this, previewView);
-            
-            // Reduced delay to 500ms (from 1500ms) - just enough time for camera to warm up
-            new android.os.Handler().postDelayed(() -> {
-                if (isAdded() && faceRecognitionSystem != null) {
-                        statusText.setText("Verifying...");
-                    
-                    // Use the camera to capture an image with optimized settings
-                    faceRecognitionSystem.captureImage(bitmap -> {
-                        if (bitmap == null) {
-                            statusText.setText("Failed to capture image. Please try again.");
+                // Initialize camera and start verification process
+                faceRecognitionSystem.initializeCamera(this, previewView);
+                
+                // Increased delay to 1500ms to give camera more time to initialize
+                new android.os.Handler().postDelayed(() -> {
+                    if (isAdded() && faceRecognitionSystem != null) {
+                        statusText.setText("Capturing face image...");
+                        
+                        // Attempt to capture the image
+                        captureImageWithRetry(bitmap -> {
+                            if (bitmap == null) {
+                                statusText.setText("Failed to capture image. Please try again.");
                                 new android.os.Handler().postDelayed(() -> {
                                     dialog.dismiss();
                                 }, 2000);
-                            return;
-                        }
-                        
-                        statusText.setText("Verifying...");
-                        
+                                return;
+                            }
+                            
+                            statusText.setText("Verifying...");
+                            
                             // Log debug information
                             Log.d(TAG, "About to verify face. User data: sevarthId=" + sevarthId + 
-                                  ", userName=" + userName + ", userId=" + userId + 
-                                  ", locationId=" + locationId);
+                                  ", userName=" + finalUserName + ", userId=" + finalUserId + 
+                                  ", locationId=" + finalLocationId + 
+                                  ", locationName=" + finalLocationName);
                             
-                        // Verify face if sevarthId exists
+                            // Verify face if sevarthId exists
                             faceRepository.verifyFace(sevarthId, bitmap, new FaceRecognitionRepository.RepositoryCallback<FaceVerificationResponse>() {
                                 @Override
                                 public void onSuccess(FaceVerificationResponse result) {
@@ -723,13 +782,19 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
                                         statusText.setText("Verified! Recording attendance...");
                                         
                                         // Mark attendance immediately after verification, providing all user details
-                                        faceRepository.markAttendance(
-                                            sevarthId, 
-                                            attendanceType, 
-                                            result.getConfidence(), 
-                                            locationId,
-                                            userName,
-                                            userId,
+                                        AttendanceRequest request = new AttendanceRequest(
+                                            sevarthId,
+                                            attendanceType,
+                                            result.getConfidence(),
+                                            finalLocationId,
+                                            finalUserName,
+                                            finalUserId);
+                                            
+                                        // Also add locationName to the request
+                                        request.setLocationName(finalLocationName);
+                                        
+                                        faceRepository.markAttendanceWithRequest(
+                                            request,
                                             new FaceRecognitionRepository.RepositoryCallback<AttendanceResponse>() {
                                                 @Override
                                                 public void onSuccess(AttendanceResponse response) {
@@ -770,14 +835,53 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
                                     });
                                 }
                             });
-                    });
-                }
-            }, 500); // Reduced delay from 1500ms to 500ms
-        } else {
-            Toast.makeText(requireContext(), "Face recognition system not initialized", Toast.LENGTH_SHORT).show();
-            dialog.dismiss();
+                        }, dialog, statusText, 0);
+                    }
+                }, 1500); // Increased from 500ms to 1500ms to allow camera to fully initialize
+            } else {
+                Toast.makeText(requireContext(), "Face recognition system not initialized", Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+            }
+        }, 500);
+    }
+    
+    // New method to handle image capture with retry
+    private void captureImageWithRetry(FaceRecognitionSystem.ImageCaptureCallback callback, 
+                                      androidx.appcompat.app.AlertDialog dialog,
+                                      TextView statusText,
+                                      int retryCount) {
+        // Maximum retry attempts
+        final int MAX_RETRIES = 2;
+        
+        if (retryCount > MAX_RETRIES) {
+            Log.e(TAG, "Exceeded maximum retry attempts for image capture");
+            statusText.setText("Failed to capture image after multiple attempts");
+            new android.os.Handler().postDelayed(() -> {
+                dialog.dismiss();
+            }, 2000);
+            return;
         }
-        }, 500); // Reduced delay from 1500ms to 500ms
+        
+        // Log retry attempt
+        if (retryCount > 0) {
+            Log.d(TAG, "Retrying image capture, attempt " + retryCount);
+            statusText.setText("Retrying image capture...");
+        }
+        
+        // Attempt to capture the image
+        faceRecognitionSystem.captureImage(bitmap -> {
+            if (bitmap == null) {
+                Log.w(TAG, "Image capture failed, retry count: " + retryCount);
+                
+                // Wait a bit and then retry
+                new android.os.Handler().postDelayed(() -> {
+                    captureImageWithRetry(callback, dialog, statusText, retryCount + 1);
+                }, 1000);
+            } else {
+                // Success - pass the bitmap to the original callback
+                callback.onImageCaptured(bitmap);
+            }
+        });
     }
 
     // Helper method to handle errors consistently
@@ -889,15 +993,60 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
 
     @Override
     public void onLocationChanged(Location location) {
-        if (location == null) {
-            Log.e(TAG, "Location is null");
-            return;
+        try {
+            if (location != null) {
+                Log.d(TAG, "Location update received: " + location.getLatitude() + ", " + location.getLongitude());
+                
+                // Create office location
+                Location officeLocation = new Location("");
+                
+                // Only calculate distance if we have valid office coordinates
+                if (officeLatitude != 0 && officeLongitude != 0) {
+                    officeLocation.setLatitude(officeLatitude);
+                    officeLocation.setLongitude(officeLongitude);
+                    
+                    // Calculate distance to office in meters
+                    float distanceToOffice = location.distanceTo(officeLocation);
+                    
+                    Log.d(TAG, "Distance to office: " + distanceToOffice + "m (Allowed radius: " + officeRadius + "m)");
+                    
+                    // Check if within radius
+                    boolean isInRange = distanceToOffice <= officeRadius;
+                    
+                    // Update UI based on location
+                    updateCheckInButtonState(isInRange);
+                    
+                    if (isInRange) {
+                        showLocationStatusMessage("You are within office range (" + (int)distanceToOffice + "m from office)");
+                    } else {
+                        showLocationStatusMessage("You are outside office range (" + (int)distanceToOffice + "m from office, radius: " + officeRadius + "m)");
+                    }
+                } else {
+                    // If we don't have valid office coordinates, do NOT default to allowing check-in
+                    Log.e(TAG, "No valid office coordinates available, disabling check-in");
+                    isWithinOfficeRadius = false;
+                    updateCheckInButtonState(false);
+                    showLocationStatusMessage("Cannot verify location: missing office coordinates", true);
+                }
+            } else {
+                // Handle null location by disabling check-in
+                Log.e(TAG, "Received null location, disabling check-in");
+                isWithinOfficeRadius = false;
+                updateCheckInButtonState(false);
+                showLocationStatusMessage("Cannot get your current location", true);
+            }
+        } catch (Exception e) {
+            // Handle any unexpected errors to prevent crash
+            Log.e(TAG, "Error processing location update: " + e.getMessage(), e);
+            // Disable check-in as fallback
+            isWithinOfficeRadius = false;
+            try {
+                updateCheckInButtonState(false);
+                showLocationStatusMessage("Error processing location: " + e.getMessage(), true);
+            } catch (Exception ex) {
+                Log.e(TAG, "Critical error updating UI: " + ex.getMessage(), ex);
+            }
         }
-        
-        Log.d(TAG, "Location update received: " + location.getLatitude() + ", " + location.getLongitude());
-        
-        // Always treat the user as in range to disable location restrictions
-        updateCheckInButtonState(true);
     }
     
     @Override

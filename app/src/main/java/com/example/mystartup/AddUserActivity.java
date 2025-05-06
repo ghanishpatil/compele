@@ -459,11 +459,16 @@ public class AddUserActivity extends AppCompatActivity {
     }
 
     private void saveUserToFirebase() {
-        // Disable buttons to prevent double submission
-        binding.nextButton.setEnabled(false);
-        binding.cancelButton.setEnabled(false);
+        // Check if we already validated inputs
+        if (!validateInputs()) {
+            return;
+        }
         
-        // Get the values from form
+        // Disable buttons during operation
+        binding.nextButton.setEnabled(false);
+        binding.cancelButton.setEnabled(true);
+        
+        // Get values from form fields
         String sevarthId = binding.sevarthIdEditText.getText().toString().trim();
         String firstName = binding.firstNameEditText.getText().toString().trim();
         String lastName = binding.lastNameEditText.getText().toString().trim();
@@ -471,12 +476,15 @@ public class AddUserActivity extends AppCompatActivity {
         String dob = binding.dobEditText.getText().toString().trim();
         String phone = binding.phoneEditText.getText().toString().trim();
         String email = binding.emailEditText.getText().toString().trim();
-        String password = editId == null ? binding.passwordEditText.getText().toString().trim() : "";
+        String password = binding.passwordEditText.getText().toString().trim();
         
-        // Add the image path to the user data
         Map<String, Object> additionalData = new HashMap<>();
+        
+        // Add the face path if an image was captured
         if (capturedImagePath != null) {
             additionalData.put("facePath", capturedImagePath);
+        } else if (selectedImageUri != null) {
+            additionalData.put("facePath", selectedImageUri.toString());
         }
         
         // Log what we're doing
@@ -492,8 +500,14 @@ public class AddUserActivity extends AppCompatActivity {
             }
             
             // Create a final copy of the input data to be used in lambda
-            final String finalEmail = email;
+            final String emailFinal = email;
             final Map<String, Object> finalAdditionalData = new HashMap<>(additionalData);
+            
+            // IMPORTANT: Show a progress dialog to let the user know something is happening
+            AlertDialog progressDialog = new AlertDialog.Builder(this)
+                .setMessage("Creating user account...")
+                .setCancelable(false)
+                .show();
             
             // Create the user in Firebase Authentication
             mAuth.createUserWithEmailAndPassword(email, password)
@@ -516,15 +530,77 @@ public class AddUserActivity extends AppCompatActivity {
                         finalAdditionalData.put("uid", firebaseUser.getUid());
                         
                         // Continue with user creation
-                        proceedWithUserCreation(sevarthId, firstName, lastName, gender, dob, phone, finalEmail, finalAdditionalData);
+                        proceedWithUserCreation(sevarthId, firstName, lastName, gender, dob, phone, emailFinal, finalAdditionalData);
+                        
+                        // Dismiss progress dialog
+                        progressDialog.dismiss();
                     }
                 })
                 .addOnFailureListener(e -> {
-                    // Failed to create user in Authentication
-                    Log.e(TAG, "Error creating user in Firebase Authentication", e);
-                    Toast.makeText(AddUserActivity.this, "Failed to create user: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                    binding.nextButton.setEnabled(true);
-                    binding.cancelButton.setEnabled(true);
+                    // Dismiss progress dialog
+                    progressDialog.dismiss();
+                    
+                    // Check if the error is because the user already exists
+                    if (e.getMessage() != null && e.getMessage().contains("email address is already in use")) {
+                        // The email is already registered, so we can try to sign in and get the UID
+                        // Create final copies of the variables for use in the lambda
+                        final String passwordFinal = password;
+                        
+                        mAuth.signInWithEmailAndPassword(emailFinal, passwordFinal)
+                            .addOnSuccessListener(authResult -> {
+                                FirebaseUser existingUser = authResult.getUser();
+                                if (existingUser != null) {
+                                    // Get the UID of the existing user
+                                    finalAdditionalData.put("uid", existingUser.getUid());
+                                    
+                                    // Sign out from the existing user and continue
+                                    mAuth.signOut();
+                                    
+                                    // Check if admin is still signed in
+                                    if (mAuth.getCurrentUser() == null) {
+                                        // Try to sign in as admin again using saved credentials
+                                        String adminEmail = prefs.getString(KEY_EMAIL, "");
+                                        String adminPassword = prefs.getString(KEY_PASSWORD, "");
+                                        
+                                        if (!adminEmail.isEmpty() && !adminPassword.isEmpty()) {
+                                            mAuth.signInWithEmailAndPassword(adminEmail, adminPassword)
+                                                .addOnSuccessListener(adminAuthResult -> {
+                                                    // Admin signed in again, continue with user creation
+                                                    proceedWithUserCreation(sevarthId, firstName, lastName, gender, dob, phone, emailFinal, finalAdditionalData);
+                                                })
+                                                .addOnFailureListener(adminAuthError -> {
+                                                    // Failed to sign in as admin
+                                                    binding.nextButton.setEnabled(true);
+                                                    Toast.makeText(AddUserActivity.this, "Admin authentication error. Please log in again.", Toast.LENGTH_LONG).show();
+                                                });
+                                        } else {
+                                            // No admin credentials saved
+                                            binding.nextButton.setEnabled(true);
+                                            Toast.makeText(AddUserActivity.this, "Admin authentication error. Please log in again.", Toast.LENGTH_LONG).show();
+                                        }
+                                    } else {
+                                        // Admin is still signed in, continue with user creation
+                                        proceedWithUserCreation(sevarthId, firstName, lastName, gender, dob, phone, emailFinal, finalAdditionalData);
+                                    }
+                                } else {
+                                    // Couldn't get the existing user
+                                    binding.nextButton.setEnabled(true);
+                                    Toast.makeText(AddUserActivity.this, "Failed to retrieve existing user data.", Toast.LENGTH_LONG).show();
+                                }
+                            })
+                            .addOnFailureListener(signInError -> {
+                                // Failed to sign in with the existing email
+                                binding.nextButton.setEnabled(true);
+                                binding.cancelButton.setEnabled(true);
+                                Toast.makeText(AddUserActivity.this, "Authentication error: " + signInError.getMessage(), Toast.LENGTH_LONG).show();
+                            });
+                    } else {
+                        // Failed to create user in Authentication for other reasons
+                        Log.e(TAG, "Error creating user in Firebase Authentication", e);
+                        Toast.makeText(AddUserActivity.this, "Failed to create user: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        binding.nextButton.setEnabled(true);
+                        binding.cancelButton.setEnabled(true);
+                    }
                 });
         } else {
             // For editing, just proceed with the update
