@@ -1,112 +1,74 @@
-# Face Recognition Attendance System Backend
+# Face Recognition Attendance Backend
 
-This backend server provides a REST API for face recognition-based attendance marking. It integrates with Firebase for storage and database functionality and uses the face_recognition library for biometric verification.
+A Flask-based backend service for face recognition attendance system that uses Firebase for authentication and data storage.
 
 ## Features
 
-- Face registration: Store reference face images for users
-- Face verification: Compare a captured face against a stored reference
-- Attendance marking: Record check-in and check-out times
-- Attendance history: Retrieve attendance records for users
+- Face registration and verification
+- User authentication with Firebase
+- Attendance tracking
+- Admin management portal
+- Location-based attendance
 
-## Requirements
+## Local Development
 
-- Python 3.8+
-- Firebase project with Firestore and Storage
-- dlib and face_recognition libraries
-- Flask server
+### Prerequisites
 
-## Setup
+- Docker and Docker Compose
+- Firebase project with Authentication, Firestore, and Storage enabled
+- Firebase Admin SDK credentials file
 
-1. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
+### Setup
 
-2. Set up Firebase:
-   - Create a Firebase project
-   - Enable Firestore Database and Storage
-   - Download service account credentials file
-   - Place the credentials file in the project root or specify path in .env
+1. Clone the repository
+2. Navigate to the backend directory
+3. Place your Firebase Admin SDK credentials file in the backend directory
+4. Update the `docker-compose.yml` file with the correct path to your credentials file
+5. Run the application with Docker Compose:
 
-3. Configure environment:
-   - Copy `.env.example` to `.env`
-   - Update the Firebase configuration in the .env file
+```bash
+docker-compose up --build
+```
 
-4. Run the server:
-   ```
-   ./run.sh
-   ```
-   Or manually:
-   ```
-   python app.py
-   ```
+The server will be available at http://localhost:5000
+
+## Deployment to Render
+
+1. Push your code to GitHub
+2. Sign up for a Render account at https://render.com
+3. Create a new Web Service and select your repository
+4. Configure the service:
+   - Environment: Docker
+   - Build directory: backend
+   - Instance Type: Choose appropriate plan (start with Free tier)
+   - Region: Choose closest to your users
+   
+5. Environment Variables
+   
+   Add the following environment variables:
+   - `FIREBASE_CREDENTIALS_JSON`: Copy and paste the entire content of your Firebase Admin SDK credentials JSON file into this variable
+
+6. Deploy the service
+
+Render will automatically build and deploy your Docker container. You can find the URL to your service in the Render dashboard.
 
 ## API Endpoints
 
-### Health Check
-- `GET /health`
-  - Response: `{"status": "ok", "message": "Face Recognition Backend is running"}`
+- `/register/admin` - Register a new admin
+- `/register/user` - Register a new user
+- `/login` - User/Admin login
+- `/api/register-face` - Register a user's face
+- `/api/verify-face` - Verify a user's face
+- `/api/mark-attendance` - Mark attendance
+- `/api/attendance-history` - Get attendance history
 
-### Face Registration
-- `POST /api/register-face`
-  - Request body: `{"sevarth_id": "USER123", "face_image": "base64_encoded_image"}`
-  - Response: `{"message": "Face registered successfully", "face_image_url": "url_to_stored_image"}`
+## Environment Variables
 
-### Face Verification
-- `POST /api/verify-face`
-  - Request body: `{"sevarth_id": "USER123", "face_image": "base64_encoded_image"}`
-  - Response: `{"verified": true, "confidence": 0.95, "message": "High confidence match"}`
-
-### Mark Attendance
-- `POST /api/mark-attendance`
-  - Request body: `{"sevarth_id": "USER123", "type": "check_in", "verification_confidence": 0.95}`
-  - Response: `{"message": "Attendance check_in marked successfully", "attendance_id": "record_id", "date": "2025-04-25", "time": "09:30:45"}`
-
-### Attendance History
-- `GET /api/attendance-history?sevarth_id=USER123&start_date=2025-04-01&end_date=2025-04-30`
-  - Query params:
-    - `sevarth_id`: Required - User's Sevarth ID
-    - `start_date`: Optional - Start date in YYYY-MM-DD format
-    - `end_date`: Optional - End date in YYYY-MM-DD format
-  - Response: `{"attendance_records": [{...}, {...}], "count": 2}`
-
-## Face Verification Logic
-
-The backend uses the `face_recognition` library to:
-1. Detect faces in both reference and captured images
-2. Generate 128-dimensional face encodings for each face
-3. Calculate the Euclidean distance between encodings
-4. Apply confidence thresholds:
-   - High confidence (≥55%): Immediate verification
-   - Minimum confidence (≥45%): Verification with warning
-   - Below minimum: Verification fails
-
-## Integration with Android App
-
-The Android app communicates with this backend using the following flow:
-1. App captures a face image when user clicks "Check In" or "Check Out"
-2. App sends the image to the backend for verification against stored reference
-3. If verified, backend marks attendance in Firebase Firestore
-4. App displays success or error message based on verification result
-
-## Test Credentials
-
-- User:
-  - Sevarth ID: user_sevarth
-  - Password: user123
-  - Role: user
-
-- Admin:
-  - Sevarth ID: admin_sevarth
-  - Password: admin123
-  - Role: admin
+- `FIREBASE_CREDENTIALS_PATH`: Path to the Firebase Admin SDK credentials file
+- `FIREBASE_CREDENTIALS_JSON`: Alternative method to provide Firebase credentials as a JSON string
 
 ## Security Notes
 
-In production:
-- Change the SECRET_KEY
-- Use environment variables for sensitive data
-- Implement a proper database
-- Add proper error handling and logging
-- Enable HTTPS 
+- Never commit your Firebase credentials file to version control
+- Always use environment variables for sensitive information
+- Use HTTPS for all API communications in production 

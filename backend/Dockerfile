@@ -26,8 +26,24 @@ COPY . .
 # Make the run script executable
 RUN chmod +x run.sh
 
+# Create a setup script to handle environment variables
+RUN echo '#!/bin/bash\n\
+# Create Firebase credentials file from environment variable if provided\n\
+if [ -n "$FIREBASE_CREDENTIALS_JSON" ]; then\n\
+    echo "Creating Firebase credentials file from environment variable"\n\
+    echo $FIREBASE_CREDENTIALS_JSON > /app/firebase-credentials.json\n\
+    export FIREBASE_CREDENTIALS_PATH="/app/firebase-credentials.json"\n\
+fi\n\
+\n\
+# Run the main app\n\
+exec ./run.sh\n\
+' > /app/entrypoint.sh
+
+# Make the entrypoint script executable
+RUN chmod +x /app/entrypoint.sh
+
 # Expose the port the app runs on
 EXPOSE 5000
 
-# Use the run script as the entry point
-CMD ["./run.sh"] 
+# Use the entrypoint script as the entry point
+CMD ["/app/entrypoint.sh"] 

@@ -1,12 +1,13 @@
 version: '3'
 
 services:
-  backend:
+  app:
     build: .
     ports:
       - "5000:5000"
     environment:
-      - FLASK_ENV=production
+      - FIREBASE_CREDENTIALS_PATH=/app/startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json
+      # Uncomment and set this if testing the environment variable method
+      # - FIREBASE_CREDENTIALS_JSON="{your_firebase_credentials_json_here}"
     volumes:
-      - ./.env:/app/.env
-      - ./startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json:/app/startup-cf3fd-firebase-adminsdk-fbsvc-893409a921.json 
+      - ./:/app 
