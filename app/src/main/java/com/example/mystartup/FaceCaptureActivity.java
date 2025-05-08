@@ -14,6 +14,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import com.example.mystartup.utils.PermissionUtils;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.common.util.concurrent.ListenableFuture;
 
@@ -26,7 +27,7 @@ import java.util.concurrent.Executors;
 
 public class FaceCaptureActivity extends AppCompatActivity {
     private static final String TAG = "FaceCaptureActivity";
-    private static final int REQUEST_CODE_PERMISSIONS = 10;
+    private static final int REQUEST_CODE_PERMISSIONS = PermissionUtils.CAMERA_PERMISSION_REQUEST_CODE;
     private static final String[] REQUIRED_PERMISSIONS = new String[]{Manifest.permission.CAMERA};
 
     private PreviewView viewFinder;
@@ -42,18 +43,36 @@ public class FaceCaptureActivity extends AppCompatActivity {
         viewFinder = findViewById(R.id.viewFinder);
         FloatingActionButton captureButton = findViewById(R.id.camera_capture_button);
 
-        // Request camera permissions
-        if (allPermissionsGranted()) {
-            startCamera();
-        } else {
-            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS);
-        }
-
         // Set up the capture button listener
         captureButton.setOnClickListener(v -> takePhoto());
 
         outputDirectory = getOutputDirectory();
         cameraExecutor = Executors.newSingleThreadExecutor();
+        
+        // Request camera permission with better UX
+        checkCameraPermissionAndStartCamera();
+    }
+    
+    private void checkCameraPermissionAndStartCamera() {
+        if (PermissionUtils.hasCameraPermission(this)) {
+            startCamera();
+        } else {
+            // Check if we should show rationale
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
+                // Show explanation dialog
+                PermissionUtils.showPermissionExplanationDialog(
+                    this,
+                    "Camera Permission Required",
+                    "This app needs camera access to capture your face for attendance marking. " +
+                    "Without this permission, you won't be able to use the face recognition feature.",
+                    REQUEST_CODE_PERMISSIONS,
+                    null
+                );
+            } else {
+                // Directly request permission
+                PermissionUtils.requestCameraPermission(this);
+            }
+        }
     }
 
     private void takePhoto() {
@@ -128,18 +147,27 @@ public class FaceCaptureActivity extends AppCompatActivity {
         return mediaDir;
     }
 
-    private boolean allPermissionsGranted() {
-        return ContextCompat.checkSelfPermission(this, REQUIRED_PERMISSIONS[0]) == PackageManager.PERMISSION_GRANTED;
-    }
-
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
-            if (allPermissionsGranted()) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Camera permission granted");
                 startCamera();
             } else {
-                Toast.makeText(this, "Camera permissions not granted", Toast.LENGTH_SHORT).show();
+                Log.d(TAG, "Camera permission denied");
+                
+                // Check if user checked "Don't ask again"
+                if (!ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
+                    // User checked "Don't ask again", show settings dialog
+                    PermissionUtils.showSettingsDialog(
+                        this,
+                        "Camera permission is required for face recognition. " +
+                        "Please enable it in app settings."
+                    );
+                } else {
+                    Toast.makeText(this, "Camera permission is required for face recognition", Toast.LENGTH_LONG).show();
+                }
                 finish();
             }
         }

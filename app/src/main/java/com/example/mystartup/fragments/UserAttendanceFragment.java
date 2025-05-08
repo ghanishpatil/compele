@@ -26,6 +26,7 @@ import com.example.mystartup.utils.FaceRecognitionSystem;
 import com.example.mystartup.LoginActivity;
 import com.example.mystartup.AttendanceHistoryActivity;
 import com.example.mystartup.utils.FirestoreAttendanceRepository;
+import com.example.mystartup.utils.PermissionUtils;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.firebase.auth.FirebaseAuth;
@@ -55,7 +56,7 @@ import android.app.AlertDialog;
 
 public class UserAttendanceFragment extends Fragment implements FaceRecognitionSystem.VerificationListener, LocationListener {
     private static final String TAG = "UserAttendanceFragment";
-    private static final int LOCATION_PERMISSION_REQUEST_CODE = 1001;
+    private static final int LOCATION_PERMISSION_REQUEST_CODE = PermissionUtils.LOCATION_PERMISSION_REQUEST_CODE;
     private static final int LOCATION_UPDATE_INTERVAL = 10000; // 10 seconds
     private static final int LOCATION_UPDATE_DISTANCE = 5; // 5 meters
 
@@ -204,17 +205,25 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
     }
     
     private void requestLocationPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (ContextCompat.checkSelfPermission(requireContext(), 
-                    Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(requireActivity(), 
-                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 
-                        LOCATION_PERMISSION_REQUEST_CODE);
-            } else {
-                startLocationUpdates();
-            }
-        } else {
+        if (PermissionUtils.hasLocationPermissions(requireContext())) {
             startLocationUpdates();
+        } else {
+            // Check if we should show rationale
+            if (ActivityCompat.shouldShowRequestPermissionRationale(requireActivity(), 
+                    Manifest.permission.ACCESS_FINE_LOCATION)) {
+                // Show explanation dialog
+                PermissionUtils.showPermissionExplanationDialog(
+                    requireActivity(),
+                    "Location Permission Required", 
+                    "This app needs location access to verify you're at the office location " +
+                    "for attendance marking. Without this permission, you won't be able to check in/out.",
+                    LOCATION_PERMISSION_REQUEST_CODE,
+                    null
+                );
+            } else {
+                // Directly request permission
+                PermissionUtils.requestLocationPermissions(requireActivity());
+            }
         }
     }
     
@@ -1071,11 +1080,26 @@ public class UserAttendanceFragment extends Fragment implements FaceRecognitionS
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Location permission granted");
                 startLocationUpdates();
             } else {
-                showLocationStatusMessage("Location permission denied. Check-in/out unavailable.", true);
+                Log.d(TAG, "Location permission denied");
+                
+                // Check if user checked "Don't ask again"
+                if (!ActivityCompat.shouldShowRequestPermissionRationale(requireActivity(), 
+                        Manifest.permission.ACCESS_FINE_LOCATION)) {
+                    // User checked "Don't ask again", show settings dialog
+                    PermissionUtils.showSettingsDialog(
+                        requireActivity(),
+                        "Location permission is required to verify you're at the office location. " +
+                        "Please enable it in app settings to use check-in/out features."
+                    );
+                } else {
+                    showLocationStatusMessage("Location permission denied. Check-in/out unavailable.", true);
+                }
                 updateCheckInButtonState(false);
             }
         }

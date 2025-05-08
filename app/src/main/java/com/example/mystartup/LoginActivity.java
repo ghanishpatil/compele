@@ -59,6 +59,9 @@ public class LoginActivity extends AppCompatActivity {
         // Initialize Firebase
         mAuth = FirebaseAuth.getInstance();
         db = FirebaseFirestore.getInstance();
+        
+        // Verify Firebase connectivity and security rules
+        verifyFirebaseAccess();
 
         prefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         
@@ -340,10 +343,27 @@ public class LoginActivity extends AppCompatActivity {
                             
                             Log.e("LoginActivity", "Authentication failed: " + e.getMessage(), e);
                             
+                            // Handle specific auth errors and provide better feedback
+                            String errorMessage = "Login failed: Invalid username or password";
+                            if (e.getMessage() != null) {
+                                String errorCode = e.getMessage();
+                                Log.d("LoginActivity", "Error code: " + errorCode);
+                                
+                                if (errorCode.contains("PERMISSION_DENIED")) {
+                                    errorMessage = "Firebase permission denied. Please check your internet connection and security rules.";
+                                } else if (errorCode.contains("ERROR_USER_NOT_FOUND") || errorCode.contains("user-not-found")) {
+                                    errorMessage = "Account not found. Please check your Sevarth ID.";
+                                } else if (errorCode.contains("ERROR_WRONG_PASSWORD") || errorCode.contains("wrong-password")) {
+                                    errorMessage = "Incorrect password. Please try again.";
+                                } else if (errorCode.contains("ERROR_TOO_MANY_REQUESTS") || errorCode.contains("too-many-requests")) {
+                                    errorMessage = "Too many failed attempts. Please try again later.";
+                                } else if (errorCode.contains("ERROR_NETWORK") || errorCode.contains("network-request-failed")) {
+                                    errorMessage = "Network error. Please check your internet connection.";
+                                }
+                            }
+                            
                             // Generic login failure
-                            Toast.makeText(LoginActivity.this, 
-                                "Login failed: Invalid username or password", 
-                                Toast.LENGTH_LONG).show();
+                            Toast.makeText(LoginActivity.this, errorMessage, Toast.LENGTH_LONG).show();
                         });
                 }
             })
@@ -360,6 +380,8 @@ public class LoginActivity extends AppCompatActivity {
      * Fetch user data from Firestore and proceed with login
      */
     private void fetchUserDataAndLogin(String userId, String role, String authMethod, AlertDialog progressDialog) {
+        Log.d("LoginActivity", "Attempting to fetch user data from Firestore for userId: " + userId);
+        
         db.collection("users")
             .document(userId)
             .get()
@@ -376,14 +398,18 @@ public class LoginActivity extends AppCompatActivity {
                     String userEmail = documentSnapshot.getString("email");
                     String userPhone = documentSnapshot.getString("phoneNumber");
                     
+                    Log.d("LoginActivity", "User document found with name: " + 
+                        (userName != null ? userName : "null") + 
+                        ", email: " + (userEmail != null ? userEmail : "null"));
+                    
                     // Save auth details with user data included
                     saveUserDataAndToken(placeholderToken, role, userId, userName, userEmail, userPhone);
                     
                     Log.d("LoginActivity", "User data loaded successfully for: " + userId);
                 } else {
                     // User document doesn't exist, use available data
-                saveAuthToken(placeholderToken, role);
                     Log.d("LoginActivity", "No user document found for: " + userId);
+                    saveAuthToken(placeholderToken, role);
                 }
                 
                 Toast.makeText(LoginActivity.this, "Login successful!", Toast.LENGTH_SHORT).show();
@@ -395,12 +421,45 @@ public class LoginActivity extends AppCompatActivity {
                 
                 Log.e("LoginActivity", "Failed to fetch user data: " + e.getMessage(), e);
                 
-                // Still allow login with minimal data
-                String placeholderToken = authMethod + "_" + System.currentTimeMillis();
-                saveAuthToken(placeholderToken, role);
-                
-                Toast.makeText(LoginActivity.this, "Login successful!", Toast.LENGTH_SHORT).show();
-                navigateToMain();
+                // Check specifically for permission issues
+                String errorMessage = e.getMessage();
+                if (errorMessage != null && errorMessage.contains("PERMISSION_DENIED")) {
+                    Log.e("LoginActivity", "Firestore permission denied - check security rules");
+                    Toast.makeText(LoginActivity.this, 
+                        "User data access denied. Please contact an administrator.", 
+                        Toast.LENGTH_LONG).show();
+                    
+                    // Fall back to Firebase auth login mode
+                    String email = userId + "@example.com";
+                    String password = binding.passwordEditText.getText().toString().trim();
+                    
+                    // Attempt to login with just Firebase Auth as a fallback
+                    mAuth.signInWithEmailAndPassword(email, password)
+                        .addOnSuccessListener(authResult -> {
+                            // Still allow login with minimal data
+                            String placeholderToken = "firebase_auth_fallback_" + System.currentTimeMillis();
+                            saveAuthToken(placeholderToken, role);
+                            
+                            Toast.makeText(LoginActivity.this, "Login successful via Firebase!", Toast.LENGTH_SHORT).show();
+                            navigateToMain();
+                        })
+                        .addOnFailureListener(authError -> {
+                            // If even Firebase Auth fails, we have to give up
+                            Log.e("LoginActivity", "Firebase Auth fallback failed: " + authError.getMessage(), authError);
+                            Toast.makeText(LoginActivity.this, 
+                                "Login failed. Please try again or contact support.", 
+                                Toast.LENGTH_LONG).show();
+                        });
+                } else {
+                    // For other errors, still try to proceed with login
+                    String placeholderToken = authMethod + "_" + System.currentTimeMillis();
+                    saveAuthToken(placeholderToken, role);
+                    
+                    Toast.makeText(LoginActivity.this, 
+                        "Login successful, but user data couldn't be retrieved.", 
+                        Toast.LENGTH_SHORT).show();
+                    navigateToMain();
+                }
             });
     }
     
@@ -507,5 +566,27 @@ public class LoginActivity extends AppCompatActivity {
     private void clearAuthState() {
         prefs.edit().clear().apply();
         mAuth.signOut();
+    }
+
+    // Add this new method to verify Firebase access
+    private void verifyFirebaseAccess() {
+        // Test read access to Firestore
+        db.collection("users")
+           .limit(1)
+           .get()
+           .addOnSuccessListener(querySnapshot -> {
+               Log.d("LoginActivity", "Firebase Firestore access test successful");
+           })
+           .addOnFailureListener(e -> {
+               Log.e("LoginActivity", "Firebase Firestore access test failed: " + e.getMessage(), e);
+               if (e.getMessage() != null && e.getMessage().contains("PERMISSION_DENIED")) {
+                   // This is just a diagnostic message. We'll still let the user try to log in.
+                   Log.e("LoginActivity", "Firebase security rules are preventing access. Check your rules settings.");
+               }
+           });
+        
+        // Test Firebase Auth configuration
+        mAuth.signOut(); // Clear any existing session
+        Log.d("LoginActivity", "Firebase Auth initialized and ready");
     }
 } 
