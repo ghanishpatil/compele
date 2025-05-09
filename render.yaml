@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: attendance-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    buildCommand: cd backend && docker build -t attendance-backend .
+    envVars:
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false # This specifies that you'll set this value manually in the dashboard 
