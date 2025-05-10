@@ -59,7 +59,7 @@ public class LoginActivity extends AppCompatActivity {
         // Initialize Firebase
         mAuth = FirebaseAuth.getInstance();
         db = FirebaseFirestore.getInstance();
-        
+
         // Verify Firebase connectivity and security rules
         verifyFirebaseAccess();
 
@@ -166,9 +166,6 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
         
-        // Format email for Firebase Authentication
-        String email = sevarthId + "@example.com";
-
         binding.loginButton.setEnabled(false);
         
         // Show progress dialog
@@ -178,24 +175,55 @@ public class LoginActivity extends AppCompatActivity {
             .create();
         progressDialog.show();
         
-        // Instead of trying backend API first, verify credentials in Firestore or local prefs
-        tryDirectFirebaseAuth(email, password, role, sevarthId, progressDialog, false);
+        // First, try to find the user in Firestore to get their actual email
+        findUserAndAttemptLogin(sevarthId, password, role, progressDialog);
     }
     
-    private void tryDirectFirebaseAuth(String email, String password, String role, String sevarthId, 
-                                        AlertDialog progressDialog, boolean showPasswordError) {
-        // Don't try Firebase Auth if we already determined the password is wrong
-        if (showPasswordError) {
-            progressDialog.dismiss();
-            Toast.makeText(LoginActivity.this, 
-                "Invalid password. Please try again or reset your password.", 
-                Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        binding.loginButton.setEnabled(false);
-        Log.d("LoginActivity", "Checking credentials for sevarth ID: " + sevarthId);
-        
+    private void findUserAndAttemptLogin(String sevarthId, String password, String role, AlertDialog progressDialog) {
+        // First check if the user exists in Firestore to get their real email
+        db.collection("users")
+            .document(sevarthId)
+            .get()
+            .addOnSuccessListener(documentSnapshot -> {
+                if (documentSnapshot.exists()) {
+                    // Get the actual email from Firestore
+                    String userEmail = documentSnapshot.getString("email");
+                    
+                    // Use the email from Firestore if available, otherwise fallback to sevarthId
+                    if (userEmail != null && !userEmail.isEmpty() && userEmail.contains("@")) {
+                        // Use the real email for authentication
+                        tryDirectFirebaseAuth(userEmail, password, role, sevarthId, progressDialog, false);
+                    } else {
+                        // No email in Firestore, check if there's a stored password
+                        String storedPassword = documentSnapshot.getString("password");
+                        boolean isPasswordCorrect = storedPassword != null && storedPassword.equals(password);
+                        
+                        if (isPasswordCorrect) {
+                            // Password matches in Firestore, allow login
+                            Log.d("LoginActivity", "Password verified in Firestore, login successful");
+                            fetchUserDataAndLogin(sevarthId, role, "firestore_verified", progressDialog);
+                        } else {
+                            // Password doesn't match Firestore record
+                            progressDialog.dismiss();
+                            binding.loginButton.setEnabled(true);
+                            Log.e("LoginActivity", "Password mismatch with Firestore record");
+                            Toast.makeText(LoginActivity.this, "Invalid password. Please try again.", Toast.LENGTH_LONG).show();
+                        }
+                    }
+                } else {
+                    // User not found in Firestore, try local overrides
+                    checkLocalOverridesAndLogin(sevarthId, password, role, progressDialog);
+                }
+            })
+            .addOnFailureListener(e -> {
+                // Error querying Firestore
+                Log.e("LoginActivity", "Error querying Firestore: " + e.getMessage());
+                // Fall back to local authentication methods
+                checkLocalOverridesAndLogin(sevarthId, password, role, progressDialog);
+            });
+    }
+    
+    private void checkLocalOverridesAndLogin(String sevarthId, String password, String role, AlertDialog progressDialog) {
         // Check if we have a password override for this user
         SharedPreferences passwordOverrides = getSharedPreferences("PasswordOverrides", Context.MODE_PRIVATE);
         
@@ -220,7 +248,7 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
         
-        // Now we'll check if there's a phone number saved in the SharedPreferences
+        // Now check for phone number based authentication
         // Loop through all keys to find phone number formats
         boolean phoneNumberFound = false;
         String matchedPhoneNumber = null;
@@ -297,82 +325,116 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
         
-        // If we get here, we didn't find a match in local overrides, continue with Firestore check
-        // First check if the user exists in Firestore and validate password
-        db.collection("users")
-            .document(sevarthId)
-            .get()
-            .addOnSuccessListener(documentSnapshot -> {
-                if (documentSnapshot.exists()) {
-                    String storedPassword = documentSnapshot.getString("password");
-                    boolean isPasswordCorrect = storedPassword != null && storedPassword.equals(password);
-                    
-                    if (isPasswordCorrect) {
-                        // Password matches in Firestore, allow login
-                        Log.d("LoginActivity", "Password verified in Firestore, login successful");
-                        fetchUserDataAndLogin(sevarthId, role, "firestore_verified", progressDialog);
-                    } else {
-                        // Password doesn't match Firestore record
-                        progressDialog.dismiss();
-                        binding.loginButton.setEnabled(true);
-                        Log.e("LoginActivity", "Password mismatch with Firestore record");
-                        Toast.makeText(LoginActivity.this, "Invalid password. Please try again.", Toast.LENGTH_LONG).show();
-                    }
-                } else {
-                    // As a last resort, try Firebase Auth
-                    // User doesn't exist in Firestore by sevarthId or local prefs
-                    mAuth.signInWithEmailAndPassword(email, password)
-                        .addOnSuccessListener(authResult -> {
-                            progressDialog.dismiss();
-                            binding.loginButton.setEnabled(true);
-                            
-                            Log.d("LoginActivity", "Firebase Auth successful");
-                            
-                            // Create a placeholder token
-                            String placeholderToken = "firebase_auth_" + System.currentTimeMillis();
-                            
-                            // Save auth details
-                            saveAuthToken(placeholderToken, role);
-                            
-                            Toast.makeText(LoginActivity.this, "Login successful via Firebase authentication!", Toast.LENGTH_SHORT).show();
-                            navigateToMain();
-                        })
-                        .addOnFailureListener(e -> {
-                            progressDialog.dismiss();
-                            binding.loginButton.setEnabled(true);
-                            
-                            Log.e("LoginActivity", "Authentication failed: " + e.getMessage(), e);
-                            
-                            // Handle specific auth errors and provide better feedback
-                            String errorMessage = "Login failed: Invalid username or password";
-                            if (e.getMessage() != null) {
-                                String errorCode = e.getMessage();
-                                Log.d("LoginActivity", "Error code: " + errorCode);
-                                
-                                if (errorCode.contains("PERMISSION_DENIED")) {
-                                    errorMessage = "Firebase permission denied. Please check your internet connection and security rules.";
-                                } else if (errorCode.contains("ERROR_USER_NOT_FOUND") || errorCode.contains("user-not-found")) {
-                                    errorMessage = "Account not found. Please check your Sevarth ID.";
-                                } else if (errorCode.contains("ERROR_WRONG_PASSWORD") || errorCode.contains("wrong-password")) {
-                                    errorMessage = "Incorrect password. Please try again.";
-                                } else if (errorCode.contains("ERROR_TOO_MANY_REQUESTS") || errorCode.contains("too-many-requests")) {
-                                    errorMessage = "Too many failed attempts. Please try again later.";
-                                } else if (errorCode.contains("ERROR_NETWORK") || errorCode.contains("network-request-failed")) {
-                                    errorMessage = "Network error. Please check your internet connection.";
-                                }
-                            }
-                            
-                            // Generic login failure
-                            Toast.makeText(LoginActivity.this, errorMessage, Toast.LENGTH_LONG).show();
-                        });
-                }
-            })
-            .addOnFailureListener(e -> {
-                // Error querying Firestore
-                Log.e("LoginActivity", "Error querying Firestore: " + e.getMessage());
+        // If all else fails, as a last resort, try Firebase Auth with the sevarthId
+        // This is left as a fallback when we can't determine the real email
+        String email = sevarthId;
+        mAuth.signInWithEmailAndPassword(email, password)
+            .addOnSuccessListener(authResult -> {
                 progressDialog.dismiss();
                 binding.loginButton.setEnabled(true);
-                Toast.makeText(LoginActivity.this, "Login failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                
+                Log.d("LoginActivity", "Firebase Auth successful with ID as email");
+                
+                // Create a placeholder token
+                String placeholderToken = "firebase_auth_" + System.currentTimeMillis();
+                
+                // Save auth details
+                saveAuthToken(placeholderToken, role);
+                
+                Toast.makeText(LoginActivity.this, "Login successful via Firebase authentication!", Toast.LENGTH_SHORT).show();
+                navigateToMain();
+            })
+            .addOnFailureListener(e -> {
+                progressDialog.dismiss();
+                binding.loginButton.setEnabled(true);
+                Log.e("LoginActivity", "Authentication failed: " + e.getMessage(), e);
+                
+                // Show appropriate error message
+                String errorMessage = "Login failed: Invalid username or password";
+                if (e.getMessage() != null) {
+                    String errorCode = e.getMessage();
+                    Log.d("LoginActivity", "Error code: " + errorCode);
+                    // Display specific error messages based on error code
+                    if (errorCode.contains("PERMISSION_DENIED")) {
+                        errorMessage = "Firebase permission denied. Please check your internet connection and security rules.";
+                    } else if (errorCode.contains("ERROR_USER_NOT_FOUND") || errorCode.contains("user-not-found")) {
+                        errorMessage = "Account not found. Please check your Sevarth ID.";
+                    } else if (errorCode.contains("ERROR_WRONG_PASSWORD") || errorCode.contains("wrong-password")) {
+                        errorMessage = "Incorrect password. Please try again.";
+                    } else if (errorCode.contains("ERROR_TOO_MANY_REQUESTS") || errorCode.contains("too-many-requests")) {
+                        errorMessage = "Too many failed attempts. Please try again later.";
+                    } else if (errorCode.contains("ERROR_NETWORK") || errorCode.contains("network-request-failed")) {
+                        errorMessage = "Network error. Please check your internet connection.";
+                    }
+                }
+                
+                Toast.makeText(LoginActivity.this, errorMessage, Toast.LENGTH_LONG).show();
+            });
+    }
+
+    private void tryDirectFirebaseAuth(String email, String password, String role, String sevarthId, 
+                                       AlertDialog progressDialog, boolean showPasswordError) {
+        // Don't try Firebase Auth if we already determined the password is wrong
+        if (showPasswordError) {
+            progressDialog.dismiss();
+            Toast.makeText(LoginActivity.this, 
+                "Invalid password. Please try again or reset your password.", 
+                Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        binding.loginButton.setEnabled(false);
+        Log.d("LoginActivity", "Attempting Firebase authentication with email: " + email);
+
+        // Authenticate with Firebase using the actual email
+        mAuth.signInWithEmailAndPassword(email, password)
+            .addOnSuccessListener(authResult -> {
+                progressDialog.dismiss();
+                binding.loginButton.setEnabled(true);
+                
+                Log.d("LoginActivity", "Firebase Auth successful");
+                
+                // Create a placeholder token
+                String placeholderToken = "firebase_auth_" + System.currentTimeMillis();
+                
+                // Save auth details including the actual email
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putString(KEY_AUTH_TOKEN, placeholderToken);
+                editor.putString(KEY_USER_ROLE, role);
+                editor.putString(KEY_EMAIL, email); // Save the real email
+                editor.putString(KEY_PASSWORD, password);
+                editor.putString(KEY_SEVARTH_ID, sevarthId);
+                editor.apply();
+                
+                Toast.makeText(LoginActivity.this, "Login successful via Firebase authentication!", Toast.LENGTH_SHORT).show();
+                navigateToMain();
+            })
+            .addOnFailureListener(e -> {
+                progressDialog.dismiss();
+                binding.loginButton.setEnabled(true);
+                
+                Log.e("LoginActivity", "Authentication failed: " + e.getMessage(), e);
+                
+                // Handle specific auth errors and provide better feedback
+                String errorMessage = "Login failed: Invalid username or password";
+                if (e.getMessage() != null) {
+                    String errorCode = e.getMessage();
+                    Log.d("LoginActivity", "Error code: " + errorCode);
+                    
+                    if (errorCode.contains("PERMISSION_DENIED")) {
+                        errorMessage = "Firebase permission denied. Please check your internet connection and security rules.";
+                    } else if (errorCode.contains("ERROR_USER_NOT_FOUND") || errorCode.contains("user-not-found")) {
+                        errorMessage = "Account not found. Please check your Sevarth ID.";
+                    } else if (errorCode.contains("ERROR_WRONG_PASSWORD") || errorCode.contains("wrong-password")) {
+                        errorMessage = "Incorrect password. Please try again.";
+                    } else if (errorCode.contains("ERROR_TOO_MANY_REQUESTS") || errorCode.contains("too-many-requests")) {
+                        errorMessage = "Too many failed attempts. Please try again later.";
+                    } else if (errorCode.contains("ERROR_NETWORK") || errorCode.contains("network-request-failed")) {
+                        errorMessage = "Network error. Please check your internet connection.";
+                    }
+                }
+                
+                Toast.makeText(LoginActivity.this, errorMessage, Toast.LENGTH_LONG).show();
             });
     }
 
@@ -397,6 +459,12 @@ public class LoginActivity extends AppCompatActivity {
                     String userName = documentSnapshot.getString("name");
                     String userEmail = documentSnapshot.getString("email");
                     String userPhone = documentSnapshot.getString("phoneNumber");
+                    
+                    // Use the actual email from Firestore
+                    if (userEmail == null || userEmail.isEmpty()) {
+                        // If we don't have an email in the database, use sevarthId without modifying it
+                        userEmail = userId;
+                    }
                     
                     Log.d("LoginActivity", "User document found with name: " + 
                         (userName != null ? userName : "null") + 
@@ -429,14 +497,13 @@ public class LoginActivity extends AppCompatActivity {
                         "User data access denied. Please contact an administrator.", 
                         Toast.LENGTH_LONG).show();
                     
-                    // Fall back to Firebase auth login mode
-                    String email = userId + "@example.com";
+                    // Fall back to Firebase auth login mode without modifying the userId
                     String password = binding.passwordEditText.getText().toString().trim();
                     
-                    // Attempt to login with just Firebase Auth as a fallback
-                    mAuth.signInWithEmailAndPassword(email, password)
+                    // Attempt to login with just Firebase Auth as a fallback (use userId directly)
+                    mAuth.signInWithEmailAndPassword(userId, password)
                         .addOnSuccessListener(authResult -> {
-                            // Still allow login with minimal data
+                // Still allow login with minimal data
                             String placeholderToken = "firebase_auth_fallback_" + System.currentTimeMillis();
                             saveAuthToken(placeholderToken, role);
                             
@@ -452,13 +519,13 @@ public class LoginActivity extends AppCompatActivity {
                         });
                 } else {
                     // For other errors, still try to proceed with login
-                    String placeholderToken = authMethod + "_" + System.currentTimeMillis();
-                    saveAuthToken(placeholderToken, role);
-                    
+                String placeholderToken = authMethod + "_" + System.currentTimeMillis();
+                saveAuthToken(placeholderToken, role);
+                
                     Toast.makeText(LoginActivity.this, 
                         "Login successful, but user data couldn't be retrieved.", 
                         Toast.LENGTH_SHORT).show();
-                    navigateToMain();
+                navigateToMain();
                 }
             });
     }
@@ -467,15 +534,18 @@ public class LoginActivity extends AppCompatActivity {
         String sevarthId = binding.sevarthIdEditText.getText().toString().trim();
         String password = binding.passwordEditText.getText().toString().trim();
         
-        // Use email from user data if available, otherwise construct one
-        if (email == null || email.isEmpty()) {
-            email = sevarthId + "@example.com";
-        }
-        
         SharedPreferences.Editor editor = prefs.edit();
         editor.putString(KEY_AUTH_TOKEN, token);
         editor.putString(KEY_USER_ROLE, role);
-        editor.putString(KEY_EMAIL, email);
+        
+        // Only save email if it's actually a valid email
+        if (email != null && !email.isEmpty() && email.contains("@")) {
+            editor.putString(KEY_EMAIL, email);
+        } else {
+            // Don't create an artificial email, just leave the field as is
+            Log.d("LoginActivity", "No valid email found for user");
+        }
+        
         editor.putString(KEY_PASSWORD, password);
         editor.putString(KEY_SEVARTH_ID, sevarthId);
         
@@ -495,18 +565,17 @@ public class LoginActivity extends AppCompatActivity {
     }
     
     private void saveAuthToken(String token, String role, String sevarthId) {
-        String email = sevarthId + "@example.com";
+        // Don't automatically create an email
         String password = binding.passwordEditText.getText().toString().trim();
         
-        prefs.edit()
-            .putString(KEY_AUTH_TOKEN, token)
-            .putString(KEY_USER_ROLE, role)
-            .putString(KEY_EMAIL, email)
-            .putString(KEY_PASSWORD, password)
-            .putString(KEY_SEVARTH_ID, sevarthId)
-            .apply();
-            
-        Log.d("LoginActivity", "Auth token and user data saved to preferences");
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(KEY_AUTH_TOKEN, token);
+        editor.putString(KEY_USER_ROLE, role);
+        editor.putString(KEY_PASSWORD, password);
+        editor.putString(KEY_SEVARTH_ID, sevarthId);
+        
+        // We'll set the email when we get user data from Firestore
+        editor.apply();
     }
 
     private boolean isNetworkAvailable() {

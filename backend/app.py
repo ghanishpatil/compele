@@ -241,182 +241,204 @@ def login():
         # For regular user login
         else:
             try:
-                # For testing purposes, construct email from sevarth_id
-                email = f"{sevarth_id}@example.com"
+                # First check if user exists in Firestore to get their real email
+                user_doc = db.collection('users').document(sevarth_id).get()
                 
-                try:
-                    # Try to get the user from Firebase Auth
-                    firebase_user = auth.get_user_by_email(email)
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
                     
-                    # First try to find user by UID
-                    user_ref = db.collection('users').where('uid', '==', firebase_user.uid).limit(1)
-                    users = list(user_ref.stream())
+                    # Get the real email from user data if available
+                    real_email = user_data.get('email')
+                    if real_email and validate_email(real_email):
+                        email = real_email
+                    else:
+                        # Use sevarth_id as a fallback email (without adding @example.com)
+                        email = sevarth_id
                     
-                    # If not found by UID, try finding by sevarth_id
-                    if not users:
-                        print(f"User not found with uid={firebase_user.uid}, trying to find by sevarthId")
-                        user_doc = db.collection('users').document(sevarth_id).get()
+                    try:
+                        # Try to get the user from Firebase Auth
+                        firebase_user = auth.get_user_by_email(email)
                         
-                        if user_doc.exists:
-                            user_data = user_doc.to_dict()
+                        # First try to find user by UID
+                        user_ref = db.collection('users').where('uid', '==', firebase_user.uid).limit(1)
+                        users = list(user_ref.stream())
+                        
+                        # If not found by UID, try finding by sevarth_id
+                        if not users:
+                            print(f"User not found with uid={firebase_user.uid}, trying to find by sevarthId")
+                            user_doc = db.collection('users').document(sevarth_id).get()
                             
-                            # If the document doesn't have a UID, update it
-                            if 'uid' not in user_data:
+                            if user_doc.exists:
+                                user_data = user_doc.to_dict()
+                                
+                                # If the document doesn't have a UID, update it
+                                if 'uid' not in user_data:
+                                    user_data['uid'] = firebase_user.uid
+                                    db.collection('users').document(sevarth_id).set(user_data)
+                                    
+                                    # Also create a document with UID as ID
+                                    db.collection('users').document(firebase_user.uid).set(user_data)
+                                    
+                                    print(f"Updated user {sevarth_id} with UID {firebase_user.uid}")
+                                
+                                # Create a custom token
+                                custom_token = auth.create_custom_token(firebase_user.uid)
+                                
+                                # Prepare user response
+                                user_response = {
+                                    'sevarth_id': sevarth_id,
+                                    'email': user_data.get('email'),
+                                    'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
+                                    'role': 'user'
+                                }
+                                
+                                print(f"User login successful for {sevarth_id} (found by sevarthId)")
+                                return jsonify({
+                                    'token': custom_token.decode(),
+                                    'user': user_response,
+                                    'message': 'Login successful'
+                                })
+                            
+                            # Still can't find the user
+                            print(f"User not found with sevarthId={sevarth_id}")
+                            return jsonify({'message': 'User not found'}), 404
+                        
+                        # User found by UID
+                        user_doc = users[0]
+                        user_data = user_doc.to_dict()
+                        
+                        # Create a custom token
+                        custom_token = auth.create_custom_token(firebase_user.uid)
+                        
+                        # Prepare user response
+                        user_response = {
+                            'sevarth_id': sevarth_id,
+                            'email': user_data.get('email'),
+                            'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
+                            'role': 'user'
+                        }
+                        
+                        print(f"User login successful for {sevarth_id}")
+                        return jsonify({
+                            'token': custom_token.decode(),
+                            'user': user_response,
+                            'message': 'Login successful'
+                        })
+                    
+                    except auth.UserNotFoundError:
+                        # Create the user if they don't exist
+                        try:
+                            # If names weren't provided, extract from sevarth_id or use defaults
+                            if not first_name or not last_name:
+                                # Try to extract name from sevarth_id (assuming format: firstname_lastname)
+                                name_parts = sevarth_id.split('_')
+                                if len(name_parts) >= 2:
+                                    first_name = name_parts[0].capitalize()
+                                    last_name = name_parts[1].capitalize()
+                                else:
+                                    # Use sevarth_id as first name if no clear name format
+                                    first_name = sevarth_id
+                                    last_name = ""
+                            
+                            # Check if user exists in Firestore
+                            user_doc = db.collection('users').document(sevarth_id).get()
+                            
+                            if user_doc.exists:
+                                user_data = user_doc.to_dict()
+                                
+                                # Get the real email from user data if available
+                                real_email = user_data.get('email')
+                                if real_email and validate_email(real_email):
+                                    email_to_use = real_email
+                                else:
+                                    # Use sevarth_id as a fallback email (without adding @example.com)
+                                    email_to_use = sevarth_id
+                                
+                                # Create user in Firebase Auth if it doesn't already exist
+                                firebase_user = auth.create_user(
+                                    email=email_to_use,
+                                    password=password,
+                                    display_name=f"{user_data.get('firstName', first_name)} {user_data.get('lastName', last_name)}".strip()
+                                )
+                                
+                                # Update the user document with UID
                                 user_data['uid'] = firebase_user.uid
                                 db.collection('users').document(sevarth_id).set(user_data)
                                 
                                 # Also create a document with UID as ID
                                 db.collection('users').document(firebase_user.uid).set(user_data)
                                 
-                                print(f"Updated user {sevarth_id} with UID {firebase_user.uid}")
-                            
-                            # Create a custom token
-                            custom_token = auth.create_custom_token(firebase_user.uid)
-                            
-                            # Prepare user response
-                            user_response = {
-                                'sevarth_id': sevarth_id,
-                                'email': user_data.get('email'),
-                                'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
-                                'role': 'user'
-                            }
-                            
-                            print(f"User login successful for {sevarth_id} (found by sevarthId)")
-                            return jsonify({
-                                'token': custom_token.decode(),
-                                'user': user_response,
-                                'message': 'Login successful'
-                            })
-                        
-                        # Still can't find the user
-                        print(f"User not found with sevarthId={sevarth_id}")
-                        return jsonify({'message': 'User not found'}), 404
-                    
-                    # User found by UID
-                    user_doc = users[0]
-                    user_data = user_doc.to_dict()
-                    
-                    # Create a custom token
-                    custom_token = auth.create_custom_token(firebase_user.uid)
-                    
-                    # Prepare user response
-                    user_response = {
-                        'sevarth_id': sevarth_id,
-                        'email': user_data.get('email'),
-                        'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
-                        'role': 'user'
-                    }
-                    
-                    print(f"User login successful for {sevarth_id}")
-                    return jsonify({
-                        'token': custom_token.decode(),
-                        'user': user_response,
-                        'message': 'Login successful'
-                    })
-                
-                except auth.UserNotFoundError:
-                    # Create the user if they don't exist
-                    try:
-                        # If names weren't provided, extract from sevarth_id or use defaults
-                        if not first_name or not last_name:
-                            # Try to extract name from sevarth_id (assuming format: firstname_lastname)
-                            name_parts = sevarth_id.split('_')
-                            if len(name_parts) >= 2:
-                                first_name = name_parts[0].capitalize()
-                                last_name = name_parts[1].capitalize()
+                                # Create a custom token
+                                custom_token = auth.create_custom_token(firebase_user.uid)
+                                
+                                # Prepare user response
+                                user_response = {
+                                    'sevarth_id': sevarth_id,
+                                    'email': email_to_use,
+                                    'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
+                                    'role': 'user'
+                                }
+                                
+                                print(f"User linked and logged in successfully: {sevarth_id}")
+                                return jsonify({
+                                    'token': custom_token.decode(),
+                                    'user': user_response,
+                                    'message': 'Login successful'
+                                })
                             else:
-                                # Use sevarth_id as first name if no clear name format
-                                first_name = sevarth_id
-                                last_name = ""
-                        
-                        # Check if user exists in Firestore
-                        user_doc = db.collection('users').document(sevarth_id).get()
-                        
-                        if user_doc.exists:
-                            user_data = user_doc.to_dict()
+                                # Create brand new user in both Firebase Auth and Firestore
+                                # Use sevarth_id as email without @example.com (this will allow login by ID)
+                                email_to_use = sevarth_id
+                                
+                                firebase_user = auth.create_user(
+                                    email=email_to_use,
+                                    password=password,
+                                    display_name=f"{first_name} {last_name}".strip()
+                                )
+                                
+                                # Create user document in Firestore with both IDs
+                                user_data = {
+                                    'uid': firebase_user.uid,
+                                    'sevarthId': sevarth_id,
+                                    'email': email_to_use, 
+                                    'firstName': first_name,
+                                    'lastName': last_name,
+                                    'role': 'user',
+                                    'createdAt': firestore.SERVER_TIMESTAMP
+                                }
+                                
+                                # Store in Firestore with sevarth_id as document ID
+                                db.collection('users').document(sevarth_id).set(user_data)
+                                
+                                # Also store with UID as document ID
+                                db.collection('users').document(firebase_user.uid).set(user_data)
+                                
+                                print(f"Created new user: {user_data}")
+                                
+                                # Create a custom token
+                                custom_token = auth.create_custom_token(firebase_user.uid)
+                                
+                                # Prepare user response
+                                user_response = {
+                                    'sevarth_id': sevarth_id,
+                                    'email': email_to_use,
+                                    'name': f"{first_name} {last_name}".strip(),
+                                    'role': 'user'
+                                }
+                                
+                                return jsonify({
+                                    'token': custom_token.decode(),
+                                    'user': user_response,
+                                    'message': 'User created and logged in successfully'
+                                })
                             
-                            # Create user in Firebase Auth if it doesn't already exist
-                            firebase_user = auth.create_user(
-                                email=email,
-                                password=password,
-                                display_name=f"{user_data.get('firstName', first_name)} {user_data.get('lastName', last_name)}".strip()
-                            )
+                        except Exception as e:
+                            print(f"Error creating user: {str(e)}")
+                            return jsonify({'message': f'Error creating user: {str(e)}'}), 500
                             
-                            # Update the user document with UID
-                            user_data['uid'] = firebase_user.uid
-                            db.collection('users').document(sevarth_id).set(user_data)
-                            
-                            # Also create a document with UID as ID
-                            db.collection('users').document(firebase_user.uid).set(user_data)
-                            
-                            # Create a custom token
-                            custom_token = auth.create_custom_token(firebase_user.uid)
-                            
-                            # Prepare user response
-                            user_response = {
-                                'sevarth_id': sevarth_id,
-                                'email': user_data.get('email'),
-                                'name': f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip(),
-                                'role': 'user'
-                            }
-                            
-                            print(f"User linked and logged in successfully: {sevarth_id}")
-                            return jsonify({
-                                'token': custom_token.decode(),
-                                'user': user_response,
-                                'message': 'Login successful'
-                            })
-                        else:
-                            # Create brand new user in both Firebase Auth and Firestore
-                            firebase_user = auth.create_user(
-                                email=email,
-                                password=password,
-                                display_name=f"{first_name} {last_name}".strip()
-                            )
-                            
-                            # Create user document in Firestore with both IDs
-                            user_data = {
-                                'uid': firebase_user.uid,
-                                'sevarthId': sevarth_id,
-                                'email': email,
-                                'firstName': first_name,
-                                'lastName': last_name,
-                                'role': 'user',
-                                'createdAt': firestore.SERVER_TIMESTAMP
-                            }
-                            
-                            # Store in Firestore with sevarth_id as document ID
-                            db.collection('users').document(sevarth_id).set(user_data)
-                            
-                            # Also store with UID as document ID
-                            db.collection('users').document(firebase_user.uid).set(user_data)
-                            
-                            print(f"Created new user: {user_data}")
-                            
-                            # Create a custom token
-                            custom_token = auth.create_custom_token(firebase_user.uid)
-                            
-                            # Prepare user response
-                            user_response = {
-                                'sevarth_id': sevarth_id,
-                                'email': email,
-                                'name': f"{first_name} {last_name}".strip(),
-                                'role': 'user'
-                            }
-                            
-                            return jsonify({
-                                'token': custom_token.decode(),
-                                'user': user_response,
-                                'message': 'User created and logged in successfully'
-                            })
-                        
-                    except Exception as e:
-                        print(f"Error creating user: {str(e)}")
-                        return jsonify({'message': f'Error creating user: {str(e)}'}), 500
-                        
-            except Exception as e:
-                print(f"Error during user login: {str(e)}")
-                return jsonify({'message': f'Error during login: {str(e)}'}), 500
+                except Exception as e:
+                    print(f"Error during user login: {str(e)}")
+                    return jsonify({'message': f'Error during login: {str(e)}'}), 500
 
     except Exception as e:
         print(f"Error during login: {str(e)}")
@@ -707,9 +729,16 @@ def register_user():
     password = data.get('password')
 
     # Validate required fields
-    if not all([sevarth_id, first_name, last_name, gender, date_of_birth, phone_number, email, location_id, password]):
+    if not all([sevarth_id, first_name, last_name, gender, date_of_birth, phone_number, location_id, password]):
         return jsonify({
             'message': 'All fields are required',
+            'success': False
+        }), 400
+
+    # Email is required and must be valid
+    if not email or not validate_email(email):
+        return jsonify({
+            'message': 'A valid email address is required',
             'success': False
         }), 400
 
@@ -731,13 +760,6 @@ def register_user():
     if not validate_sevarth_id(sevarth_id):
         return jsonify({
             'message': 'Sevarth ID must contain both alphabets and numbers (minimum 6 characters)',
-            'success': False
-        }), 400
-
-    # Validate email format
-    if not validate_email(email):
-        return jsonify({
-            'message': 'Invalid email format',
             'success': False
         }), 400
 

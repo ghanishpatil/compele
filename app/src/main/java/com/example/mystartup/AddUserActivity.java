@@ -493,10 +493,11 @@ public class AddUserActivity extends AppCompatActivity {
         
         // If we're creating a new user, first create in Firebase Authentication
         if (editId == null && !password.isEmpty()) {
-            // Check if the email is already formatted properly
-            if (!email.contains("@")) {
-                // Format email as required (use sevarth_id as username)
-                email = sevarthId + "@example.com";
+            // Use the email provided by the user, never auto-generate one
+            if (email.isEmpty()) {
+                binding.emailLayout.setError("Email is required for account creation");
+                binding.nextButton.setEnabled(true);
+                return;
             }
             
             // Create a final copy of the input data to be used in lambda
